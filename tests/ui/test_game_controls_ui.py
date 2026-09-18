@@ -2,7 +2,7 @@
 
 from pytestqt.qtbot import QtBot
 
-from chess_desktop.domain.enums import GameStatus
+from chess_desktop.domain.enums import GameStatus, PlayerType
 from chess_desktop.services.game_service import GameService
 from chess_desktop.ui.board.navigation_bar import NavigationBar
 from chess_desktop.ui.dialogs.confirm_dialog import ConfirmDialog
@@ -43,7 +43,7 @@ def test_confirm_dialog_rejection(qtbot: QtBot) -> None:
 def test_navigation_bar_state_progression(qtbot: QtBot) -> None:
     """Verify NavigationBar enables/disables buttons as moves are made and reviewed."""
     service = GameService()
-    service.new_game("White", "Black")
+    service.new_game("White", "Black", PlayerType.HUMAN, PlayerType.HUMAN)
 
     nav_bar = NavigationBar(service)
     qtbot.addWidget(nav_bar)
@@ -87,15 +87,18 @@ def test_navigation_bar_state_progression(qtbot: QtBot) -> None:
     assert service.get_state().review_ply is None
     assert not nav_bar._review_container.isVisible()
     assert not nav_bar._next_btn.isEnabled()
+    service.cleanup()
 
 
 def test_main_window_game_controls_integration(qtbot: QtBot) -> None:
     """Verify MainWindow integrates NavigationBar and handles basic game control actions."""
     window = MainWindow()
+    window._skip_close_confirm = True
     qtbot.addWidget(window)
     window.show()
 
     service = window.game_service
+    service.new_game("White", "Black", PlayerType.HUMAN, PlayerType.HUMAN)
     assert service.get_state().status == GameStatus.IN_PROGRESS
 
     # Make moves

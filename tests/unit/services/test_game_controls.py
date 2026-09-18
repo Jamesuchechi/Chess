@@ -1,12 +1,18 @@
 """Unit tests for Phase 2 game controls (Undo, Resign, Draw, Navigation, Branching)."""
 
-from chess_desktop.domain.enums import Color, GameStatus, PieceType
+from chess_desktop.domain.enums import Color, GameStatus, PieceType, PlayerType
 from chess_desktop.services.game_service import GameService
+
+
+def _create_human_service() -> GameService:
+    service = GameService()
+    service.new_game("White", "Black", PlayerType.HUMAN, PlayerType.HUMAN)
+    return service
 
 
 def test_undo_single_move() -> None:
     """Verify undo reverts 1 ply and restores board state and turn."""
-    service = GameService()
+    service = _create_human_service()
     service.try_move("e2", "e4")
     assert len(service.get_state().moves) == 1
     assert service.get_state().turn == Color.BLACK
@@ -17,11 +23,12 @@ def test_undo_single_move() -> None:
     assert service.get_state().turn == Color.WHITE
     assert service.board.piece_at("e4") is None
     assert service.board.piece_at("e2") == (PieceType.PAWN, Color.WHITE)
+    service.cleanup()
 
 
 def test_undo_restores_captured_piece() -> None:
     """Verify undoing a capture restores the captured piece and material diff."""
-    service = GameService()
+    service = _create_human_service()
     service.try_move("e2", "e4")
     service.try_move("d7", "d5")
     service.try_move("e4", "d5")  # White captures pawn
@@ -37,18 +44,20 @@ def test_undo_restores_captured_piece() -> None:
     assert state_after.material_difference == 0
     assert service.board.piece_at("d5") == (PieceType.PAWN, Color.BLACK)
     assert service.board.piece_at("e4") == (PieceType.PAWN, Color.WHITE)
+    service.cleanup()
 
 
 def test_undo_when_not_allowed() -> None:
     """Verify undo cannot be performed on empty board or finished game."""
-    service = GameService()
+    service = _create_human_service()
     assert service.can_undo is False
     assert service.undo_move() is False
+    service.cleanup()
 
 
 def test_resign_game() -> None:
     """Verify resignation announces opponent win and terminates game."""
-    service = GameService()
+    service = _create_human_service()
     service.try_move("e2", "e4")
 
     game_over_signals = []
@@ -63,11 +72,12 @@ def test_resign_game() -> None:
 
     # Cannot resign again
     assert service.resign(Color.WHITE) is False
+    service.cleanup()
 
 
 def test_accept_draw() -> None:
     """Verify mutual draw agreement terminates game."""
-    service = GameService()
+    service = _create_human_service()
     service.try_move("e2", "e4")
     service.try_move("e7", "e5")
 
@@ -75,11 +85,12 @@ def test_accept_draw() -> None:
     assert success is True
     assert service.get_state().status == GameStatus.DRAW_AGREED
     assert service.get_state().status.is_draw is True
+    service.cleanup()
 
 
 def test_move_navigation_and_review_mode() -> None:
     """Verify historical navigation sets review mode and produces accurate board snapshots."""
-    service = GameService()
+    service = _create_human_service()
     service.try_move("e2", "e4")  # ply 1
     service.try_move("e7", "e5")  # ply 2
     service.try_move("g1", "f3")  # ply 3
@@ -114,11 +125,12 @@ def test_move_navigation_and_review_mode() -> None:
     assert not service.is_reviewing
     assert service.current_ply == 4
     assert service.display_board.piece_at("c6") == (PieceType.KNIGHT, Color.BLACK)
+    service.cleanup()
 
 
 def test_branching_at_historical_ply() -> None:
     """Verify playing from an earlier ply truncates future moves and starts a new line."""
-    service = GameService()
+    service = _create_human_service()
     service.try_move("e2", "e4")  # ply 1
     service.try_move("e7", "e5")  # ply 2
     service.try_move("g1", "f3")  # ply 3
@@ -140,3 +152,4 @@ def test_branching_at_historical_ply() -> None:
     assert state.moves[2].san == "d4"
     assert service.board.piece_at("f3") is None
     assert service.board.piece_at("d4") == (PieceType.PAWN, Color.WHITE)
+    service.cleanup()

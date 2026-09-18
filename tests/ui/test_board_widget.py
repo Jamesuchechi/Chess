@@ -3,6 +3,7 @@
 from PySide6.QtCore import QPoint, Qt
 from pytestqt.qtbot import QtBot
 
+from chess_desktop.domain.enums import PlayerType
 from chess_desktop.services.game_service import GameService
 from chess_desktop.ui.board.board_widget import BoardWidget
 
@@ -48,6 +49,7 @@ def test_board_widget_square_at_pos(qtbot: QtBot) -> None:
 def test_board_widget_click_selection_and_move(qtbot: QtBot) -> None:
     """Verify clicking friendly piece selects it and clicking target executes move."""
     service = GameService()
+    service.new_game("White", "Black", PlayerType.HUMAN, PlayerType.HUMAN)
     widget = BoardWidget(service)
     qtbot.addWidget(widget)
     widget.resize(400, 400)
@@ -71,3 +73,4 @@ def test_board_widget_click_selection_and_move(qtbot: QtBot) -> None:
     assert widget._selected_square is None
     assert service.get_state().last_move == ("e2", "e4")
     assert service.get_state().turn.value == "black"
+    service.cleanup()

@@ -86,9 +86,10 @@ class EngineWorker(QObject):
             logger.debug("Engine quit exception: %s", e)
 
         if self._thread is not None:
-            self._thread.quit()
-            self._thread.wait(2000)
+            thread = self._thread
             self._thread = None
+            thread.quit()
+            thread.wait(2000)
 
         self._is_started = False
         logger.info("EngineWorker stopped cleanly.")

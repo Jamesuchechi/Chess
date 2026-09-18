@@ -1,7 +1,7 @@
 """Unit tests for GameService."""
 
 from chess_desktop.chess.board import ChessBoard
-from chess_desktop.domain.enums import Color, PieceType
+from chess_desktop.domain.enums import Color, PieceType, PlayerType
 from chess_desktop.domain.game_state import GameState, MoveRecord
 from chess_desktop.services.game_service import GameService
 
@@ -21,6 +21,7 @@ def test_game_service_new_game() -> None:
 def test_game_service_make_move() -> None:
     """Verify making a legal move updates state and emits signals."""
     service = GameService()
+    service.new_game("White", "Black", PlayerType.HUMAN, PlayerType.HUMAN)
     received_records: list[MoveRecord] = []
     received_states: list[GameState] = []
 
@@ -34,6 +35,7 @@ def test_game_service_make_move() -> None:
     assert len(received_states) == 1
     assert received_states[0].turn == Color.BLACK
     assert received_states[0].last_move == ("e2", "e4")
+    service.cleanup()
 
 
 def test_game_service_illegal_move() -> None:
@@ -43,6 +45,7 @@ def test_game_service_illegal_move() -> None:
     assert success is False
     assert service.get_state().turn == Color.WHITE
     assert service.get_state().moves == []
+    service.cleanup()
 
 
 def test_game_service_promotion_request() -> None:
@@ -63,6 +66,7 @@ def test_game_service_promotion_request() -> None:
     success = service.try_move("a7", "a8", promotion=PieceType.QUEEN)
     assert success is True
     assert service.get_state().moves[-1].san == "a8=Q#"
+    service.cleanup()
 
 
 def test_game_service_board_flip() -> None:
@@ -80,3 +84,4 @@ def test_game_service_board_flip() -> None:
     service.flip_board()
     assert service.is_flipped is False
     assert flips == [True, False]
+    service.cleanup()

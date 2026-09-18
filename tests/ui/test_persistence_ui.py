@@ -80,6 +80,7 @@ def test_open_game_dialog_flow(qtbot: QtBot) -> None:
 def test_main_window_save_and_title_update(qtbot: QtBot) -> None:
     """Verify saving a game updates MainWindow title and marks clean."""
     window = MainWindow()
+    window._skip_close_confirm = True
     qtbot.addWidget(window)
     window.show()
 

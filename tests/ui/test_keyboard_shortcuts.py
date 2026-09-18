@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent
 from pytestqt.qtbot import QtBot
 
+from chess_desktop.domain.enums import PlayerType
 from chess_desktop.domain.theme import BoardTheme
 from chess_desktop.ui.windows.main_window import MainWindow
 
@@ -13,8 +14,10 @@ from chess_desktop.ui.windows.main_window import MainWindow
 def test_main_window_keyboard_shortcuts(qtbot: QtBot) -> None:
     """MainWindow registers window-wide actions for navigation and actions."""
     window = MainWindow()
+    window._skip_close_confirm = True
     qtbot.addWidget(window)
     window.show()
+    window.game_service.new_game("White", "Black", PlayerType.HUMAN, PlayerType.HUMAN)
 
     # Flip board
     initial_flipped = window.game_service.is_flipped
@@ -95,6 +98,7 @@ def test_main_window_theme_switching(qtbot: QtBot) -> None:
 def test_main_window_sound_service_wiring(qtbot: QtBot) -> None:
     """Making a move triggers play_move_record on sound service."""
     window = MainWindow()
+    window.game_service.new_game("White", "Black", PlayerType.HUMAN, PlayerType.HUMAN)
     qtbot.addWidget(window)
 
     mock_play_move = MagicMock()

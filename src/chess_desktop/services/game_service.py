@@ -49,8 +49,18 @@ class GameService(QObject):
         self._clock.tick.connect(self._on_clock_tick)
         self._clock.timeout.connect(self._on_clock_timeout)
 
-        self._white_player = Player("White", Color.WHITE)
-        self._black_player = Player("Black", Color.BLACK)
+        self._difficulty: Difficulty = Difficulty.INTERMEDIATE
+        self._is_engine_thinking = False
+        self._engine_worker: EngineWorker | None = None
+        if engine_worker is not None:
+            self.set_engine_worker(engine_worker)
+
+        self._white_player = Player("Player", Color.WHITE, player_type=PlayerType.HUMAN)
+        self._black_player = Player(
+            f"Stockfish ({self._difficulty.display_name})",
+            Color.BLACK,
+            player_type=PlayerType.COMPUTER,
+        )
         self._game = Game(
             white_player=self._white_player,
             black_player=self._black_player,
@@ -63,12 +73,6 @@ class GameService(QObject):
                 time_control=self._clock.time_control,
             ),
         )
-
-        self._difficulty: Difficulty = Difficulty.INTERMEDIATE
-        self._is_engine_thinking = False
-        self._engine_worker: EngineWorker | None = None
-        if engine_worker is not None:
-            self.set_engine_worker(engine_worker)
 
     @property
     def clock(self) -> ChessClock:
@@ -188,10 +192,10 @@ class GameService(QObject):
 
     def new_game(
         self,
-        white_name: str = "White",
-        black_name: str = "Black",
+        white_name: str = "Player",
+        black_name: str | None = None,
         white_type: PlayerType = PlayerType.HUMAN,
-        black_type: PlayerType = PlayerType.HUMAN,
+        black_type: PlayerType = PlayerType.COMPUTER,
         difficulty: Difficulty = Difficulty.INTERMEDIATE,
         time_control: TimeControl | None = None,
     ) -> None:
@@ -200,6 +204,13 @@ class GameService(QObject):
         self._difficulty = difficulty
         tc = time_control or TimeControl.unlimited()
         self._clock.reset(tc)
+
+        if black_name is None:
+            black_name = (
+                f"Stockfish ({difficulty.display_name})"
+                if black_type == PlayerType.COMPUTER
+                else "Black"
+            )
 
         self._board.reset()
         self._moves.clear()

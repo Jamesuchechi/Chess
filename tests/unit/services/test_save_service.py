@@ -3,6 +3,7 @@
 import tempfile
 from pathlib import Path
 
+from chess_desktop.domain.enums import PlayerType
 from chess_desktop.persistence.database import DatabaseManager
 from chess_desktop.persistence.repositories import GameRepository
 from chess_desktop.services.game_service import GameService
@@ -14,6 +15,7 @@ def test_save_service_dirty_tracking() -> None:
     db = DatabaseManager(":memory:")
     repo = GameRepository(db)
     game_service = GameService()
+    game_service.new_game("White", "Black", PlayerType.HUMAN, PlayerType.HUMAN)
     save_service = SaveService(game_service, repository=repo)
 
     assert not save_service.has_unsaved_changes
@@ -37,6 +39,7 @@ def test_save_service_dirty_tracking() -> None:
     assert saved_id == game_id
     assert not save_service.has_unsaved_changes
     db.close()
+    game_service.cleanup()
 
 
 def test_save_service_load_game() -> None:
@@ -44,6 +47,7 @@ def test_save_service_load_game() -> None:
     db = DatabaseManager(":memory:")
     repo = GameRepository(db)
     game_service = GameService()
+    game_service.new_game("White", "Black", PlayerType.HUMAN, PlayerType.HUMAN)
     save_service = SaveService(game_service, repository=repo)
 
     # Play moves and save
@@ -52,7 +56,7 @@ def test_save_service_load_game() -> None:
     game_id = save_service.save_as("Queen's Pawn")
 
     # Start brand new game
-    game_service.new_game("Player1", "Player2")
+    game_service.new_game("Player1", "Player2", PlayerType.HUMAN, PlayerType.HUMAN)
     save_service.reset_tracking()
     assert len(game_service.get_state().moves) == 0
 
@@ -65,6 +69,7 @@ def test_save_service_load_game() -> None:
     assert save_service.current_game_title == "Queen's Pawn"
     assert not save_service.has_unsaved_changes
     db.close()
+    game_service.cleanup()
 
 
 def test_save_service_export_and_import_pgn_file() -> None:
@@ -72,6 +77,7 @@ def test_save_service_export_and_import_pgn_file() -> None:
     db = DatabaseManager(":memory:")
     repo = GameRepository(db)
     game_service = GameService()
+    game_service.new_game("White", "Black", PlayerType.HUMAN, PlayerType.HUMAN)
     save_service = SaveService(game_service, repository=repo)
 
     game_service.try_move("e2", "e4")
@@ -84,7 +90,7 @@ def test_save_service_export_and_import_pgn_file() -> None:
         assert Path(pgn_path).exists()
 
         # Reset to new game
-        game_service.new_game()
+        game_service.new_game("White", "Black", PlayerType.HUMAN, PlayerType.HUMAN)
         assert len(game_service.get_state().moves) == 0
 
         # Import PGN
@@ -92,4 +98,5 @@ def test_save_service_export_and_import_pgn_file() -> None:
         assert len(game_service.get_state().moves) == 2
         assert [m.san for m in game_service.get_state().moves] == ["e4", "c5"]
         assert save_service.current_game_title == "sicilian"
-    db.close()
+        db.close()
+        game_service.cleanup()

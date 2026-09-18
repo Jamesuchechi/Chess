@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 import chess_desktop.ui.resources_rc  # noqa: F401
-from chess_desktop.domain.enums import Color, PieceType
+from chess_desktop.domain.enums import Color, PieceType, PlayerType
 from chess_desktop.domain.game_state import GameState
 from chess_desktop.services.game_service import GameService
 from chess_desktop.ui.board.clock_widget import ClockWidget
@@ -55,6 +55,24 @@ class CapturedPanel(QWidget):
         self._name_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #ffffff;")
         self._layout.addWidget(self._name_label)
 
+        # Player type badge (BOT / HUMAN)
+        self._type_badge = QLabel(self)
+        self._type_badge.setStyleSheet(
+            """
+            QLabel {
+                background-color: #2e382b;
+                color: #87ab62;
+                font-size: 10px;
+                font-weight: bold;
+                border: 1px solid #4d6638;
+                border-radius: 3px;
+                padding: 1px 5px;
+            }
+            """
+        )
+        self._type_badge.hide()
+        self._layout.addWidget(self._type_badge)
+
         # Captured pieces container
         self._captured_container = QWidget(self)
         self._captured_layout = QHBoxLayout(self._captured_container)
@@ -96,10 +114,16 @@ class CapturedPanel(QWidget):
 
     def update_state(self, state: GameState) -> None:
         """Update display based on active GameState."""
-        # Update player name
+        # Update player name and badge
         game = self._service.get_game()
         player = game.white_player if self._color == Color.WHITE else game.black_player
         self._name_label.setText(player.name)
+
+        if player.player_type == PlayerType.COMPUTER:
+            self._type_badge.setText("🤖 BOT")
+            self._type_badge.show()
+        else:
+            self._type_badge.hide()
 
         # Turn indicator
         is_my_turn = state.turn == self._color and not state.status.is_game_over

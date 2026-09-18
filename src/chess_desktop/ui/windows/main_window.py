@@ -202,12 +202,16 @@ class MainWindow(QMainWindow):
 
         # Right area: Move history & quick actions
         self._history_panel = HistoryPanel(self._service, central_widget)
+        self._history_panel.new_game_requested.connect(self._handle_new_game)
         root_layout.addWidget(self._history_panel)
 
         # Status bar
         self._status_bar = QStatusBar(self)
         self.setStatusBar(self._status_bar)
-        self._status_bar.showMessage("Ready. White to move.")
+        self._status_bar.showMessage("Ready. White (Player) to move vs Stockfish.")
+
+        # Ensure engine worker is ready for Play vs Computer
+        self._service.ensure_engine_worker()
 
     def _init_shortcuts(self) -> None:
         """Set up application keyboard shortcuts with WindowShortcut context."""
@@ -405,7 +409,11 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """Confirm exit if unsaved changes exist, and terminate engine worker."""
-        if self._save_service.has_unsaved_changes:
+        if (
+            self.isVisible()
+            and not getattr(self, "_skip_close_confirm", False)
+            and self._save_service.has_unsaved_changes
+        ):
             dlg = ConfirmDialog(
                 title="Unsaved Changes",
                 message="You have unsaved changes in this game.\n\nDiscard changes and exit?",
