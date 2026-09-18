@@ -1,0 +1,135 @@
+"""Captured pieces and player status panel."""
+
+from collections import Counter
+
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QPixmap
+from PySide6.QtSvg import QSvgRenderer
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QWidget,
+)
+
+import chess_desktop.ui.resources_rc  # noqa: F401
+from chess_desktop.domain.enums import Color, PieceType
+from chess_desktop.domain.game_state import GameState
+from chess_desktop.services.game_service import GameService
+
+
+class CapturedPanel(QWidget):
+    """Displays player identity, turn status, captured pieces, and material differential."""
+
+    def __init__(
+        self,
+        color: Color,
+        game_service: GameService,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._color = color
+        self._service = game_service
+
+        self.setFixedHeight(42)
+        self._init_ui()
+
+        self._service.state_changed.connect(self.update_state)
+        self.update_state(self._service.get_state())
+
+    def _init_ui(self) -> None:
+        self._layout = QHBoxLayout(self)
+        self._layout.setContentsMargins(8, 4, 8, 4)
+        self._layout.setSpacing(10)
+
+        # Turn indicator indicator circle
+        self._turn_dot = QLabel(self)
+        self._turn_dot.setFixedSize(10, 10)
+        self._layout.addWidget(self._turn_dot)
+
+        # Player name label
+        name = "White" if self._color == Color.WHITE else "Black"
+        self._name_label = QLabel(name, self)
+        self._name_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #ffffff;")
+        self._layout.addWidget(self._name_label)
+
+        # Captured pieces container
+        self._captured_container = QWidget(self)
+        self._captured_layout = QHBoxLayout(self._captured_container)
+        self._captured_layout.setContentsMargins(0, 0, 0, 0)
+        self._captured_layout.setSpacing(2)
+        self._layout.addWidget(self._captured_container)
+
+        # Material differential badge (+3, etc.)
+        self._diff_badge = QLabel(self)
+        self._diff_badge.setStyleSheet(
+            """
+            QLabel {
+                background-color: #383838;
+                color: #e0e0e0;
+                font-size: 12px;
+                font-weight: bold;
+                border-radius: 4px;
+                padding: 2px 6px;
+            }
+            """
+        )
+        self._diff_badge.hide()
+        self._layout.addWidget(self._diff_badge)
+
+        self._layout.addStretch()
+
+    def update_state(self, state: GameState) -> None:
+        """Update display based on active GameState."""
+        # Turn indicator
+        is_my_turn = state.turn == self._color and not state.status.is_game_over
+        dot_color = "#769656" if is_my_turn else "transparent"
+        self._turn_dot.setStyleSheet(f"background-color: {dot_color}; border-radius: 5px;")
+
+        # Clear existing captured piece icons
+        while self._captured_layout.count():
+            item = self._captured_layout.takeAt(0)
+            if item:
+                widget = item.widget()
+                if widget:
+                    widget.deleteLater()
+
+        # Captured pieces: captured_white contains Black pieces taken by White
+        captured = state.captured_white if self._color == Color.WHITE else state.captured_black
+        counts = Counter(captured)
+
+        # Draw icons for opponent piece types captured
+        opp_prefix = "b" if self._color == Color.WHITE else "w"
+        piece_order = [
+            (PieceType.QUEEN, "Q"),
+            (PieceType.ROOK, "R"),
+            (PieceType.BISHOP, "B"),
+            (PieceType.KNIGHT, "N"),
+            (PieceType.PAWN, "P"),
+        ]
+
+        for pt, code in piece_order:
+            count = counts[pt]
+            if count > 0:
+                renderer = QSvgRenderer(f":/pieces/{opp_prefix}{code}.svg")
+                pixmap = QPixmap(QSize(22, 22))
+                pixmap.fill(Qt.GlobalColor.transparent)
+                from PySide6.QtGui import QPainter
+
+                painter = QPainter(pixmap)
+                renderer.render(painter)
+                painter.end()
+
+                for _ in range(count):
+                    lbl = QLabel(self)
+                    lbl.setPixmap(pixmap)
+                    lbl.setFixedSize(22, 22)
+                    self._captured_layout.addWidget(lbl)
+
+        # Material diff badge
+        diff = state.material_difference
+        my_diff = diff if self._color == Color.WHITE else -diff
+        if my_diff > 0:
+            self._diff_badge.setText(f"+{my_diff}")
+            self._diff_badge.show()
+        else:
+            self._diff_badge.hide()

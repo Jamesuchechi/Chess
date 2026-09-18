@@ -1,0 +1,17 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/">
+        <file>pieces/wP.svg</file>
+        <file>pieces/wN.svg</file>
+        <file>pieces/wB.svg</file>
+        <file>pieces/wR.svg</file>
+        <file>pieces/wQ.svg</file>
+        <file>pieces/wK.svg</file>
+        <file>pieces/bP.svg</file>
+        <file>pieces/bN.svg</file>
+        <file>pieces/bB.svg</file>
+        <file>pieces/bR.svg</file>
+        <file>pieces/bQ.svg</file>
+        <file>pieces/bK.svg</file>
+    </qresource>
+</RCC>

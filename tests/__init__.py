@@ -1,0 +1,1 @@
+"""Chess Desktop test suite."""
