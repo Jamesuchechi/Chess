@@ -37,6 +37,9 @@ class CapturedPanel(QWidget):
         self._service.state_changed.connect(self.update_state)
         self._service.clock_ticked.connect(self._on_clock_ticked)
         self._service.clock.active_color_changed.connect(self._on_clock_active_changed)
+        self._service.engine_thinking_changed.connect(
+            lambda _: self.update_state(self._service.get_state())
+        )
         self.update_state(self._service.get_state())
 
     def _init_ui(self) -> None:
@@ -120,7 +123,40 @@ class CapturedPanel(QWidget):
         self._name_label.setText(player.name)
 
         if player.player_type == PlayerType.COMPUTER:
-            self._type_badge.setText("🤖 BOT")
+            if (
+                self._service.is_computer_thinking
+                and state.turn == self._color
+                and not state.status.is_game_over
+            ):
+                self._type_badge.setText("🤖 Thinking...")
+                self._type_badge.setStyleSheet(
+                    """
+                    QLabel {
+                        background-color: #3b3a24;
+                        color: #facc15;
+                        font-size: 10px;
+                        font-weight: bold;
+                        border: 1px solid #716210;
+                        border-radius: 3px;
+                        padding: 1px 5px;
+                    }
+                    """
+                )
+            else:
+                self._type_badge.setText("🤖 BOT")
+                self._type_badge.setStyleSheet(
+                    """
+                    QLabel {
+                        background-color: #2e382b;
+                        color: #87ab62;
+                        font-size: 10px;
+                        font-weight: bold;
+                        border: 1px solid #4d6638;
+                        border-radius: 3px;
+                        padding: 1px 5px;
+                    }
+                    """
+                )
             self._type_badge.show()
         else:
             self._type_badge.hide()

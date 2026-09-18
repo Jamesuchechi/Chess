@@ -91,11 +91,13 @@ class MainWindow(QMainWindow):
         return self._board_widget
 
     def _apply_initial_settings(self) -> None:
-        """Apply stored user preferences to audio and board components."""
+        """Apply stored user preferences to audio, engine, and board components."""
         self._sound_service.set_sound_enabled(self._settings_service.sound_enabled)
         self._sound_service.set_volume(self._settings_service.sound_volume)
         theme = BoardTheme.from_name(self._settings_service.board_theme)
         self._board_widget.set_theme(theme)
+        worker = self._service.ensure_engine_worker()
+        worker.thinking_delay_enabled = self._settings_service.thinking_delay_enabled
 
     def _init_menu_bar(self) -> None:
         """Create application menu bar and File menu."""
@@ -252,6 +254,9 @@ class MainWindow(QMainWindow):
         )
         self._settings_service.sound_enabled_changed.connect(self._sound_service.set_sound_enabled)
         self._settings_service.sound_volume_changed.connect(self._sound_service.set_volume)
+        self._settings_service.thinking_delay_enabled_changed.connect(
+            lambda en: setattr(self._service.ensure_engine_worker(), "thinking_delay_enabled", en)
+        )
 
     def _update_window_title(self, *args: object) -> None:
         """Update window title with current game title and unsaved changes asterisk."""

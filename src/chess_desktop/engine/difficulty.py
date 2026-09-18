@@ -86,3 +86,18 @@ class Difficulty(Enum):
                 return 1000
             case Difficulty.MASTER:
                 return 2000
+
+    @property
+    def thinking_delay_range_ms(self) -> tuple[int, int]:
+        """Realistic thinking delay range in ms (min_ms, max_ms) to simulate human ponder time."""
+        match self:
+            case Difficulty.BEGINNER:
+                return (1200, 2000)
+            case Difficulty.CASUAL:
+                return (1500, 2400)
+            case Difficulty.INTERMEDIATE:
+                return (2000, 3000)
+            case Difficulty.ADVANCED:
+                return (2200, 3500)
+            case Difficulty.MASTER:
+                return (2500, 4000)

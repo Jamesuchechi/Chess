@@ -26,7 +26,7 @@ def test_default_game_is_play_vs_computer() -> None:
 
 def test_default_game_triggers_computer_reply(qtbot: QtBot) -> None:
     """Verify that playing move 1 in the default game triggers an automatic computer response."""
-    worker = EngineWorker(engine=FallbackEngine())
+    worker = EngineWorker(engine=FallbackEngine(), thinking_delay_enabled=False)
     service = GameService(engine_worker=worker)
 
     assert service.is_vs_computer is True

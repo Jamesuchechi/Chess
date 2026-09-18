@@ -18,6 +18,7 @@ def test_settings_service_defaults() -> None:
     assert service.sound_volume == 80
     assert service.stockfish_path == ""
     assert service.default_difficulty == "Intermediate"
+    assert service.thinking_delay_enabled is True
     settings.clear()
 
 
@@ -69,5 +70,11 @@ def test_settings_service_updates_and_signals() -> None:
     service.set_default_difficulty("Expert")
     assert service.default_difficulty == "Expert"
 
-    assert len(generic_calls) >= 5
+    delay_calls: list[bool] = []
+    service.thinking_delay_enabled_changed.connect(delay_calls.append)
+    service.set_thinking_delay_enabled(False)
+    assert service.thinking_delay_enabled is False
+    assert delay_calls == [False]
+
+    assert len(generic_calls) >= 6
     settings.clear()

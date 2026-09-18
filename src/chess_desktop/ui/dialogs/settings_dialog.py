@@ -153,6 +153,10 @@ class SettingsDialog(QDialog):
         self._update_engine_probe()
         eng_form.addRow("Status:", self._probe_label)
 
+        self._delay_check = QCheckBox("Simulate realistic thinking delay (2–3 seconds)", eng_group)
+        self._delay_check.setChecked(self._settings.thinking_delay_enabled)
+        eng_form.addRow("", self._delay_check)
+
         eng_layout.addWidget(eng_group)
         eng_layout.addStretch()
         tabs.addTab(engine_tab, "Engine")
@@ -225,6 +229,7 @@ class SettingsDialog(QDialog):
         self._settings.set_sound_volume(self._vol_slider.value())
         self._settings.set_stockfish_path(self._path_edit.text().strip())
         self._settings.set_default_difficulty(self._diff_combo.currentText())
+        self._settings.set_thinking_delay_enabled(self._delay_check.isChecked())
 
         if self._sound:
             self._sound.set_enabled(self._sound_check.isChecked())

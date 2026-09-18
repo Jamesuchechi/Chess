@@ -11,7 +11,7 @@ from chess_desktop.services.game_service import GameService
 
 def test_vs_computer_reply_and_two_ply_undo(qtbot: QtBot) -> None:
     """Verify computer automatically replies to human move and undo rewinds 2 plies."""
-    worker = EngineWorker(engine=FallbackEngine())
+    worker = EngineWorker(engine=FallbackEngine(), thinking_delay_enabled=False)
     service = GameService(engine_worker=worker)
 
     service.new_game(
@@ -44,7 +44,7 @@ def test_vs_computer_reply_and_two_ply_undo(qtbot: QtBot) -> None:
 
 def test_vs_computer_as_white(qtbot: QtBot) -> None:
     """Verify when Computer is White, it plays move 1 automatically."""
-    worker = EngineWorker(engine=FallbackEngine())
+    worker = EngineWorker(engine=FallbackEngine(), thinking_delay_enabled=False)
     service = GameService(engine_worker=worker)
 
     service.new_game(
@@ -63,7 +63,7 @@ def test_vs_computer_as_white(qtbot: QtBot) -> None:
 
 def test_vs_computer_blocks_move_during_thinking(qtbot: QtBot) -> None:
     """Verify human cannot play a move while computer is computing its reply."""
-    worker = EngineWorker(engine=FallbackEngine())
+    worker = EngineWorker(engine=FallbackEngine(), thinking_delay_enabled=False)
     service = GameService(engine_worker=worker)
 
     service.new_game(

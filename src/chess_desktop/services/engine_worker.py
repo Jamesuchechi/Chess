@@ -1,6 +1,8 @@
 """Asynchronous engine worker thread manager for non-blocking search."""
 
 import logging
+import random
+import time
 from typing import Any
 
 from PySide6.QtCore import QObject, QThread, Signal, Slot
@@ -25,9 +27,13 @@ class EngineWorker(QObject):
     def __init__(
         self,
         engine: ChessEngine | None = None,
+        thinking_delay_enabled: bool = True,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
+        self._thinking_delay_enabled = thinking_delay_enabled
+        self._is_cancelled = False
+
         if engine is not None:
             self._engine = engine
         else:
@@ -52,9 +58,23 @@ class EngineWorker(QObject):
         return self._engine
 
     @property
+    def is_cancelled(self) -> bool:
+        """True if cancellation was requested."""
+        return self._is_cancelled
+
+    @property
     def is_using_stockfish(self) -> bool:
         """True if the active engine is StockfishEngine."""
         return isinstance(self._engine, StockfishEngine)
+
+    @property
+    def thinking_delay_enabled(self) -> bool:
+        """True if human-like thinking delay is simulated."""
+        return self._thinking_delay_enabled
+
+    @thinking_delay_enabled.setter
+    def thinking_delay_enabled(self, value: bool) -> None:
+        self._thinking_delay_enabled = value
 
     def start_worker(self) -> None:
         """Start engine backend and move worker onto dedicated QThread."""
@@ -105,6 +125,8 @@ class EngineWorker(QObject):
         diff: Difficulty = (
             difficulty if isinstance(difficulty, Difficulty) else Difficulty.INTERMEDIATE
         )
+        self._is_cancelled = False
+        start_time = time.monotonic()
 
         try:
             self.search_started.emit()
@@ -115,6 +137,28 @@ class EngineWorker(QObject):
                 time_ms=diff.time_limit_ms,
                 skill_level=diff.skill_level,
             )
+
+            if self.is_cancelled:
+                logger.debug("Search cancelled after engine search.")
+                return
+
+            # Simulate realistic 2-3s human-like thinking delay
+            if self._thinking_delay_enabled:
+                min_delay_ms, max_delay_ms = diff.thinking_delay_range_ms
+                target_delay_sec = random.uniform(min_delay_ms / 1000.0, max_delay_ms / 1000.0)
+                elapsed = time.monotonic() - start_time
+                remaining = target_delay_sec - elapsed
+
+                # Sleep in short slices checking cancellation so Undo/Resign/New Game respond instantly
+                while remaining > 0 and not self.is_cancelled:
+                    chunk = min(remaining, 0.05)
+                    time.sleep(chunk)
+                    remaining -= chunk
+
+            if getattr(self, "_is_cancelled", False):
+                logger.debug("Search cancelled during simulated thinking delay.")
+                return
+
             self.best_move_found.emit(move)
         except SearchCancelledError:
             logger.debug("Search cancelled as requested.")
@@ -127,6 +171,7 @@ class EngineWorker(QObject):
     @Slot()
     def cancel_search(self) -> None:
         """Interrupt any ongoing engine calculation."""
+        self._is_cancelled = True
         try:
             self._engine.stop()
         except Exception as e:

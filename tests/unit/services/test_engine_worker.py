@@ -7,12 +7,12 @@ from chess_desktop.engine.fallback_engine import FallbackEngine
 from chess_desktop.services.engine_worker import EngineWorker
 
 
-def test_engine_worker_async_search(qtbot: QtBot) -> None:
-    """Verify EngineWorker emits search_started, best_move_found, and search_stopped."""
-    worker = EngineWorker(engine=FallbackEngine())
+def test_engine_worker_fast_mode(qtbot: QtBot) -> None:
+    """Verify EngineWorker with thinking_delay_enabled=False executes immediately."""
+    worker = EngineWorker(engine=FallbackEngine(), thinking_delay_enabled=False)
     worker.start_worker()
 
-    with qtbot.waitSignal(worker.best_move_found, timeout=3000) as blocker:
+    with qtbot.waitSignal(worker.best_move_found, timeout=1000) as blocker:
         worker.request_move(
             fen="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
             moves_uci=["e2e4"],
@@ -26,10 +26,10 @@ def test_engine_worker_async_search(qtbot: QtBot) -> None:
 
 def test_engine_worker_cancellation(qtbot: QtBot) -> None:
     """Verify cancel_search interrupts search without emitting best_move_found."""
-    worker = EngineWorker(engine=FallbackEngine())
+    worker = EngineWorker(engine=FallbackEngine(), thinking_delay_enabled=True)
     worker.start_worker()
 
-    # Request move and cancel immediately
+    # Request move and cancel immediately during delay
     worker.request_move(
         fen="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
         moves_uci=[],

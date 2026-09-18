@@ -18,6 +18,7 @@ class SettingsService(QObject):
     sound_volume_changed = Signal(int)
     stockfish_path_changed = Signal(str)
     default_difficulty_changed = Signal(str)
+    thinking_delay_enabled_changed = Signal(bool)
 
     def __init__(self, parent: Any = None, settings: QSettings | None = None) -> None:
         super().__init__(parent)
@@ -87,4 +88,17 @@ class SettingsService(QObject):
     def set_default_difficulty(self, diff: str) -> None:
         self._settings.setValue("engine/default_difficulty", diff)
         self.default_difficulty_changed.emit(diff)
+        self.settings_changed.emit()
+
+    @property
+    def thinking_delay_enabled(self) -> bool:
+        """True if the engine should simulate a natural 2-3s thinking delay."""
+        val = self._settings.value("engine/thinking_delay_enabled", True)
+        if isinstance(val, bool):
+            return val
+        return str(val).lower() in ("true", "1")
+
+    def set_thinking_delay_enabled(self, enabled: bool) -> None:
+        self._settings.setValue("engine/thinking_delay_enabled", enabled)
+        self.thinking_delay_enabled_changed.emit(enabled)
         self.settings_changed.emit()
