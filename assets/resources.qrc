@@ -20,5 +20,6 @@
         <file>sounds/promotion.wav</file>
         <file>sounds/game_start.wav</file>
         <file>sounds/game_end.wav</file>
+        <file>icons/chess-desktop.svg</file>
     </qresource>
 </RCC>

@@ -1,6 +1,6 @@
 [project]
 name = "chess-desktop"
-version = "0.1.0"
+version = "1.0.0"
 description = "A polished, offline-first desktop chess application for Linux and Windows"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -10,6 +10,9 @@ dependencies = [
     "PySide6>=6.7.0",
     "chess>=1.10.0",
 ]
+
+[project.scripts]
+chess-desktop = "chess_desktop.main:main"
 
 [project.optional-dependencies]
 dev = [

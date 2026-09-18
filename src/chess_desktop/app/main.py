@@ -4,8 +4,10 @@ import logging
 import sys
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
+import chess_desktop.ui.resources_rc  # noqa: F401
 from chess_desktop.ui.windows.main_window import MainWindow
 
 logger = logging.getLogger(__name__)
@@ -27,8 +29,10 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("Chess Desktop")
     app.setOrganizationName("ChessDesktop")
+    app.setWindowIcon(QIcon(":/icons/chess-desktop.svg"))
 
     window = MainWindow()
+    window.setWindowIcon(QIcon(":/icons/chess-desktop.svg"))
     window.show()
 
     return app.exec()

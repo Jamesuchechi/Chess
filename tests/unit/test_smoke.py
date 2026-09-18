@@ -8,7 +8,7 @@ from chess_desktop.ui.windows.main_window import MainWindow
 
 def test_package_version() -> None:
     """Verify package version is defined."""
-    assert chess_desktop.__version__ == "0.1.0"
+    assert chess_desktop.__version__ == "1.0.0"
 
 
 def test_python_chess_dependency() -> None:
