@@ -12,6 +12,7 @@ from chess_desktop.domain.enums import Color, GameStatus
 from chess_desktop.domain.game import Game
 from chess_desktop.domain.game_state import MoveRecord
 from chess_desktop.domain.player import Player
+from chess_desktop.domain.time_control import TimeControl
 from chess_desktop.persistence.models import determine_result
 
 
@@ -40,6 +41,9 @@ class PgnService:
         pgn_game.headers["White"] = game.white_player.name
         pgn_game.headers["Black"] = game.black_player.name
         pgn_game.headers["Result"] = result_str
+
+        if game.state.time_control and not game.state.time_control.is_unlimited:
+            pgn_game.headers["TimeControl"] = game.state.time_control.to_pgn_tag()
 
         node: chess.pgn.GameNode = pgn_game
         for record in game.state.moves:
@@ -88,11 +92,15 @@ class PgnService:
             elif result in ("1-0", "0-1"):
                 status_override = GameStatus.RESIGNED
 
+        tc_tag = pgn_game.headers.get("TimeControl", "")
+        time_control = TimeControl.from_pgn_tag(tc_tag) if tc_tag else None
+
         state = MoveService.build_game_state(
             board=board,
             last_move=last_move,
             moves=moves,
             status_override=status_override,
+            time_control=time_control,
         )
 
         return Game(

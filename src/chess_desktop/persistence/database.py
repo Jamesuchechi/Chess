@@ -83,12 +83,25 @@ class DatabaseManager:
                     moves_uci TEXT NOT NULL,
                     move_count INTEGER NOT NULL,
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    white_time_ms INTEGER,
+                    black_time_ms INTEGER,
+                    time_control TEXT
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_games_updated_at ON games (updated_at DESC);
                 """
             )
+
+            # Check and migrate columns if table existed without them
+            cursor = conn.execute("PRAGMA table_info(games);")
+            columns = {row["name"] for row in cursor.fetchall()}
+            if "white_time_ms" not in columns:
+                conn.execute("ALTER TABLE games ADD COLUMN white_time_ms INTEGER;")
+            if "black_time_ms" not in columns:
+                conn.execute("ALTER TABLE games ADD COLUMN black_time_ms INTEGER;")
+            if "time_control" not in columns:
+                conn.execute("ALTER TABLE games ADD COLUMN time_control TEXT;")
 
     def close(self) -> None:
         """Close persistent resources (relevant for in-memory database)."""

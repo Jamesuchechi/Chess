@@ -13,5 +13,12 @@
         <file>pieces/bR.svg</file>
         <file>pieces/bQ.svg</file>
         <file>pieces/bK.svg</file>
+        <file>sounds/move.wav</file>
+        <file>sounds/capture.wav</file>
+        <file>sounds/check.wav</file>
+        <file>sounds/castle.wav</file>
+        <file>sounds/promotion.wav</file>
+        <file>sounds/game_start.wav</file>
+        <file>sounds/game_end.wav</file>
     </qresource>
 </RCC>

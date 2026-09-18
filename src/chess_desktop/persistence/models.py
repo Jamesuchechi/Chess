@@ -44,6 +44,9 @@ class SavedGameRecord:
     move_count: int
     created_at: str
     updated_at: str
+    white_time_ms: int | None = None
+    black_time_ms: int | None = None
+    time_control: str = ""
 
     @classmethod
     def from_game(
@@ -57,6 +60,7 @@ class SavedGameRecord:
         now_iso = datetime.now(UTC).isoformat()
         uci_moves = " ".join(record.uci for record in game.state.moves)
         result_str = determine_result(game.state.status, game.state.turn)
+        tc_str = game.state.time_control.to_pgn_tag() if game.state.time_control else ""
 
         return cls(
             game_id=game.game_id,
@@ -71,6 +75,9 @@ class SavedGameRecord:
             move_count=len(game.state.moves),
             created_at=created_at or now_iso,
             updated_at=now_iso,
+            white_time_ms=game.state.white_time_ms,
+            black_time_ms=game.state.black_time_ms,
+            time_control=tc_str,
         )
 
 

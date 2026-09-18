@@ -1,5 +1,6 @@
-"""Main application window for Chess Desktop."""
+from typing import Any
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -10,19 +11,24 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from chess_desktop.domain.enums import Color, GameStatus, PieceType
+from chess_desktop.domain.enums import Color, GameStatus, PieceType, PlayerType
 from chess_desktop.domain.game_state import GameState
+from chess_desktop.domain.theme import BoardTheme
 from chess_desktop.services.game_service import GameService
 from chess_desktop.services.save_service import SaveService
+from chess_desktop.services.settings_service import SettingsService
+from chess_desktop.services.sound_service import SoundService
 from chess_desktop.ui.board.board_widget import BoardWidget
 from chess_desktop.ui.board.captured_panel import CapturedPanel
 from chess_desktop.ui.board.history_panel import HistoryPanel
 from chess_desktop.ui.board.navigation_bar import NavigationBar
 from chess_desktop.ui.dialogs.confirm_dialog import ConfirmDialog
 from chess_desktop.ui.dialogs.game_over_dialog import GameOverDialog
+from chess_desktop.ui.dialogs.new_game_dialog import NewGameDialog
 from chess_desktop.ui.dialogs.open_game_dialog import OpenGameDialog
 from chess_desktop.ui.dialogs.promotion_dialog import PromotionDialog
 from chess_desktop.ui.dialogs.save_as_dialog import SaveAsDialog
+from chess_desktop.ui.dialogs.settings_dialog import SettingsDialog
 
 
 class MainWindow(QMainWindow):
@@ -50,10 +56,13 @@ class MainWindow(QMainWindow):
 
         self._service = GameService(self)
         self._save_service = SaveService(self._service, parent=self)
+        self._settings_service = SettingsService(self)
+        self._sound_service = SoundService(self)
         self._init_menu_bar()
         self._init_ui()
         self._init_shortcuts()
         self._connect_signals()
+        self._apply_initial_settings()
         self._update_window_title()
 
     @property
@@ -65,6 +74,28 @@ class MainWindow(QMainWindow):
     def save_service(self) -> SaveService:
         """Access underlying SaveService."""
         return self._save_service
+
+    @property
+    def settings_service(self) -> SettingsService:
+        """Access application settings service."""
+        return self._settings_service
+
+    @property
+    def sound_service(self) -> SoundService:
+        """Access sound playback service."""
+        return self._sound_service
+
+    @property
+    def board_widget(self) -> BoardWidget:
+        """Access chessboard widget."""
+        return self._board_widget
+
+    def _apply_initial_settings(self) -> None:
+        """Apply stored user preferences to audio and board components."""
+        self._sound_service.set_sound_enabled(self._settings_service.sound_enabled)
+        self._sound_service.set_volume(self._settings_service.sound_volume)
+        theme = BoardTheme.from_name(self._settings_service.board_theme)
+        self._board_widget.set_theme(theme)
 
     def _init_menu_bar(self) -> None:
         """Create application menu bar and File menu."""
@@ -103,10 +134,38 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
+        action_settings = QAction("&Preferences...", self)
+        action_settings.setShortcut(QKeySequence.StandardKey.Preferences)
+        action_settings.triggered.connect(self._handle_open_settings)
+        file_menu.addAction(action_settings)
+
+        file_menu.addSeparator()
+
         action_exit = QAction("E&xit", self)
         action_exit.setShortcut(QKeySequence.StandardKey.Quit)
         action_exit.triggered.connect(self.close)
         file_menu.addAction(action_exit)
+
+        # Edit menu
+        edit_menu = menu_bar.addMenu("&Edit")
+        action_undo = QAction("&Undo Move", self)
+        action_undo.setShortcut(QKeySequence.StandardKey.Undo)
+        action_undo.triggered.connect(self._service.undo_move)
+        edit_menu.addAction(action_undo)
+
+        # View menu
+        view_menu = menu_bar.addMenu("&View")
+        action_flip = QAction("&Flip Board", self)
+        action_flip.setShortcut(QKeySequence("F"))
+        action_flip.triggered.connect(self._service.flip_board)
+        view_menu.addAction(action_flip)
+
+        # Settings menu
+        settings_menu = menu_bar.addMenu("&Settings")
+        action_prefs = QAction("&Preferences...", self)
+        action_prefs.setShortcut(QKeySequence("Ctrl+,"))
+        action_prefs.triggered.connect(self._handle_open_settings)
+        settings_menu.addAction(action_prefs)
 
     def _init_ui(self) -> None:
         """Initialize the main window layout and components."""
@@ -151,57 +210,44 @@ class MainWindow(QMainWindow):
         self._status_bar.showMessage("Ready. White to move.")
 
     def _init_shortcuts(self) -> None:
-        """Set up application keyboard shortcuts."""
-        # 'F' to flip board
-        flip_action = QAction("Flip Board", self)
-        flip_action.setShortcut(QKeySequence("F"))
-        flip_action.triggered.connect(self._service.flip_board)
-        self.addAction(flip_action)
+        """Set up application keyboard shortcuts with WindowShortcut context."""
 
-        # 'Ctrl+N' for new game
-        new_game_action = QAction("New Game", self)
-        new_game_action.setShortcut(QKeySequence("Ctrl+N"))
-        new_game_action.triggered.connect(self._handle_new_game)
-        self.addAction(new_game_action)
+        def register(key: str | QKeySequence.StandardKey, callback: Any) -> QAction:
+            action = QAction(self)
+            action.setShortcut(QKeySequence(key))
+            action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
+            action.triggered.connect(callback)
+            self.addAction(action)
+            return action
 
-        # 'Ctrl+Z' for undo
-        self._undo_action = QAction("Undo", self)
-        self._undo_action.setShortcut(QKeySequence("Ctrl+Z"))
-        self._undo_action.triggered.connect(self._service.undo_move)
-        self.addAction(self._undo_action)
-
-        # Left arrow: previous move
-        prev_action = QAction("Previous Move", self)
-        prev_action.setShortcut(QKeySequence("Left"))
-        prev_action.triggered.connect(self._service.step_backward)
-        self.addAction(prev_action)
-
-        # Right arrow: next move
-        next_action = QAction("Next Move", self)
-        next_action.setShortcut(QKeySequence("Right"))
-        next_action.triggered.connect(self._service.step_forward)
-        self.addAction(next_action)
-
-        # Home: first move
-        home_action = QAction("First Move", self)
-        home_action.setShortcut(QKeySequence("Home"))
-        home_action.triggered.connect(self._service.go_to_start)
-        self.addAction(home_action)
-
-        # End: live move
-        end_action = QAction("Live Position", self)
-        end_action.setShortcut(QKeySequence("End"))
-        end_action.triggered.connect(self._service.go_to_live)
-        self.addAction(end_action)
+        self._flip_action = register("F", self._service.flip_board)
+        self._new_game_action = register(QKeySequence.StandardKey.New, self._handle_new_game)
+        self._open_game_action = register(QKeySequence.StandardKey.Open, self._handle_open_game)
+        self._save_game_action = register(QKeySequence.StandardKey.Save, self._handle_save_game)
+        self._undo_action = register(QKeySequence.StandardKey.Undo, self._service.undo_move)
+        self._pref_action = register("Ctrl+,", self._handle_open_settings)
+        self._prev_action = register("Left", self._service.step_backward)
+        self._next_action = register("Right", self._service.step_forward)
+        self._home_action = register("Home", self._service.go_to_start)
+        self._end_action = register("End", self._service.go_to_live)
+        self._esc_action = register("Escape", self._board_widget.clear_selection)
 
     def _connect_signals(self) -> None:
         """Connect service signals to window dialogs and status bar."""
         self._service.promotion_requested.connect(self._handle_promotion)
         self._service.game_over.connect(self._handle_game_over)
+        self._service.game_over.connect(lambda *_: self._sound_service.play_game_end())
+        self._service.move_made.connect(self._sound_service.play_move_record)
         self._service.state_changed.connect(self._handle_state_changed)
+        self._service.engine_thinking_changed.connect(self._handle_engine_thinking_changed)
         self._save_service.dirty_changed.connect(lambda _: self._update_window_title())
         self._save_service.game_saved.connect(lambda _: self._update_window_title())
         self._save_service.game_loaded.connect(lambda _: self._update_window_title())
+        self._settings_service.board_theme_changed.connect(
+            lambda name: self._board_widget.set_theme(BoardTheme.from_name(name))
+        )
+        self._settings_service.sound_enabled_changed.connect(self._sound_service.set_sound_enabled)
+        self._settings_service.sound_volume_changed.connect(self._sound_service.set_volume)
 
     def _update_window_title(self, *args: object) -> None:
         """Update window title with current game title and unsaved changes asterisk."""
@@ -214,7 +260,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(title)
 
     def _handle_new_game(self) -> None:
-        """Start new game with confirmation if unsaved changes or moves in progress."""
+        """Prompt New Game dialog and start configured match."""
         if self._save_service.has_unsaved_changes:
             dlg = ConfirmDialog(
                 title="Start New Game?",
@@ -226,9 +272,46 @@ class MainWindow(QMainWindow):
             )
             if not dlg.exec():
                 return
-        self._service.new_game()
+
+        new_dlg = NewGameDialog(parent=self)
+        if not new_dlg.exec():
+            return
+
+        w_name, b_name, w_type, b_type, diff, tc = new_dlg.get_game_parameters()
+
+        # If custom stockfish path was chosen and found, attach it
+        if new_dlg.stockfish_path and new_dlg.is_vs_computer:
+            from chess_desktop.engine.stockfish import StockfishEngine
+            from chess_desktop.services.engine_worker import EngineWorker
+
+            worker = EngineWorker(StockfishEngine(new_dlg.stockfish_path))
+            self._service.set_engine_worker(worker)
+
+        self._service.new_game(
+            white_name=w_name,
+            black_name=b_name,
+            white_type=w_type,
+            black_type=b_type,
+            difficulty=diff,
+            time_control=tc,
+        )
+
+        # If human chose Black vs Computer, orient board with Black at bottom
+        if w_type == PlayerType.COMPUTER and b_type == PlayerType.HUMAN:
+            if not self._service.is_flipped:
+                self._service.flip_board()
+        else:
+            if self._service.is_flipped:
+                self._service.flip_board()
+
         self._save_service.reset_tracking()
         self._update_window_title()
+        self._sound_service.play_game_start()
+
+    def _handle_open_settings(self) -> None:
+        """Show settings dialog."""
+        dlg = SettingsDialog(self._settings_service, self._sound_service, self)
+        dlg.exec()
 
     def _handle_save_game(self) -> None:
         """Save game to SQLite; prompt for title if never saved before."""
@@ -321,7 +404,7 @@ class MainWindow(QMainWindow):
                 self._status_bar.showMessage(f"Import failed: {e}")
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        """Confirm exit if unsaved changes exist."""
+        """Confirm exit if unsaved changes exist, and terminate engine worker."""
         if self._save_service.has_unsaved_changes:
             dlg = ConfirmDialog(
                 title="Unsaved Changes",
@@ -334,6 +417,8 @@ class MainWindow(QMainWindow):
             if not dlg.exec():
                 event.ignore()
                 return
+
+        self._service.cleanup()
         event.accept()
 
     def _handle_promotion(self, from_sq: str, to_sq: str) -> None:
@@ -348,7 +433,14 @@ class MainWindow(QMainWindow):
         """Show Game Over dialog and offer new game."""
         dialog = GameOverDialog(status, message, self)
         if dialog.exec() and dialog.start_new_game_requested:
-            self._service.new_game()
+            self._handle_new_game()
+
+    def _handle_engine_thinking_changed(self, is_thinking: bool) -> None:
+        """Update status bar when engine starts or finishes thinking."""
+        if is_thinking:
+            self._status_bar.showMessage("Thinking... (Stockfish is calculating move)")
+        else:
+            self._handle_state_changed(self._service.get_state())
 
     def _handle_state_changed(self, state: GameState) -> None:
         """Update status bar on state change."""

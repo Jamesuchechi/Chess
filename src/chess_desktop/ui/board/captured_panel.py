@@ -15,6 +15,7 @@ import chess_desktop.ui.resources_rc  # noqa: F401
 from chess_desktop.domain.enums import Color, PieceType
 from chess_desktop.domain.game_state import GameState
 from chess_desktop.services.game_service import GameService
+from chess_desktop.ui.board.clock_widget import ClockWidget
 
 
 class CapturedPanel(QWidget):
@@ -34,6 +35,8 @@ class CapturedPanel(QWidget):
         self._init_ui()
 
         self._service.state_changed.connect(self.update_state)
+        self._service.clock_ticked.connect(self._on_clock_ticked)
+        self._service.clock.active_color_changed.connect(self._on_clock_active_changed)
         self.update_state(self._service.get_state())
 
     def _init_ui(self) -> None:
@@ -78,12 +81,40 @@ class CapturedPanel(QWidget):
 
         self._layout.addStretch()
 
+        # Digital Chess Clock
+        self._clock_widget = ClockWidget(self._color, self)
+        self._layout.addWidget(self._clock_widget)
+
+    def _on_clock_ticked(self, white_ms: int, black_ms: int) -> None:
+        """Handle high-frequency clock tick."""
+        time_ms = white_ms if self._color == Color.WHITE else black_ms
+        self._clock_widget.set_time_ms(time_ms)
+
+    def _on_clock_active_changed(self, active_color: Color | None) -> None:
+        """Handle clock active turn changes."""
+        self._clock_widget.set_active(active_color == self._color)
+
     def update_state(self, state: GameState) -> None:
         """Update display based on active GameState."""
+        # Update player name
+        game = self._service.get_game()
+        player = game.white_player if self._color == Color.WHITE else game.black_player
+        self._name_label.setText(player.name)
+
         # Turn indicator
         is_my_turn = state.turn == self._color and not state.status.is_game_over
         dot_color = "#769656" if is_my_turn else "transparent"
         self._turn_dot.setStyleSheet(f"background-color: {dot_color}; border-radius: 5px;")
+
+        # Clock updates
+        tc = state.time_control
+        is_unlimited = tc is None or tc.is_unlimited
+        self._clock_widget.set_unlimited(is_unlimited)
+        if not is_unlimited:
+            time_ms = state.white_time_ms if self._color == Color.WHITE else state.black_time_ms
+            if time_ms is not None:
+                self._clock_widget.set_time_ms(time_ms)
+            self._clock_widget.set_active(self._service.clock.active_color == self._color)
 
         # Clear existing captured piece icons
         while self._captured_layout.count():

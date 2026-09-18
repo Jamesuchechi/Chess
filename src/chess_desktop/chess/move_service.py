@@ -7,6 +7,7 @@ import chess
 from chess_desktop.chess.board import ChessBoard
 from chess_desktop.domain.enums import GameStatus, PieceType
 from chess_desktop.domain.game_state import GameState, MoveRecord
+from chess_desktop.domain.time_control import TimeControl
 
 # Standard piece count per side
 _INITIAL_PIECES: Counter[PieceType] = Counter(
@@ -197,6 +198,9 @@ class MoveService:
         review_ply: int | None = None,
         status_override: GameStatus | None = None,
         status_message_override: str | None = None,
+        white_time_ms: int | None = None,
+        black_time_ms: int | None = None,
+        time_control: TimeControl | None = None,
     ) -> GameState:
         """Construct authoritative GameState snapshot from board."""
         status, msg = MoveService.evaluate_game_status(board)
@@ -222,4 +226,7 @@ class MoveService:
             moves=moves,
             status_message=msg,
             review_ply=review_ply,
+            white_time_ms=white_time_ms,
+            black_time_ms=black_time_ms,
+            time_control=time_control,
         )

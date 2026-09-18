@@ -4,6 +4,7 @@ import time
 from dataclasses import dataclass, field
 
 from chess_desktop.domain.enums import Color, GameStatus, PieceType
+from chess_desktop.domain.time_control import TimeControl
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,8 @@ class MoveRecord:
     captured_piece: PieceType | None = None
     is_check: bool = False
     timestamp: float = field(default_factory=time.time)
+    white_time_ms: int | None = None
+    black_time_ms: int | None = None
 
 
 @dataclass(frozen=True)
@@ -37,6 +40,9 @@ class GameState:
     moves: list[MoveRecord] = field(default_factory=list)
     status_message: str | None = None
     review_ply: int | None = None  # None indicates viewing the active live position
+    white_time_ms: int | None = None
+    black_time_ms: int | None = None
+    time_control: TimeControl | None = None
 
     @property
     def is_reviewing(self) -> bool:

@@ -5,6 +5,7 @@ from PySide6.QtCore import QPoint, QRectF, Qt
 from PySide6.QtGui import (
     QColor,
     QFont,
+    QKeyEvent,
     QMouseEvent,
     QPainter,
     QPaintEvent,
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import QApplication, QWidget
 import chess_desktop.ui.resources_rc  # noqa: F401 - registers Qt resources
 from chess_desktop.domain.enums import Color, PieceType
 from chess_desktop.domain.game_state import GameState
+from chess_desktop.domain.theme import BoardTheme
 from chess_desktop.services.game_service import GameService
 from chess_desktop.ui.dialogs.confirm_dialog import ConfirmDialog
 
@@ -33,8 +35,10 @@ class BoardWidget(QWidget):
     def __init__(self, game_service: GameService, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._service = game_service
+        self._theme = BoardTheme.classic()
         self.setMinimumSize(360, 360)
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         # Selection and interaction state
         self._selected_square: str | None = None
@@ -54,6 +58,40 @@ class BoardWidget(QWidget):
         self._service.state_changed.connect(self._on_state_changed)
         self._service.board_flipped.connect(self._on_board_flipped)
         self._service.review_changed.connect(lambda _: self.update())
+
+    @property
+    def theme(self) -> BoardTheme:
+        """Active board color theme."""
+        return self._theme
+
+    def set_theme(self, theme: BoardTheme) -> None:
+        """Change board theme and trigger repaint."""
+        self._theme = theme
+        self.update()
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        """Handle keyboard navigation and cancellation."""
+        key = event.key()
+        if key == Qt.Key.Key_Escape:
+            self._selected_square = None
+            self._legal_targets.clear()
+            self._is_dragging = False
+            self._drag_square = None
+            self.update()
+        elif key == Qt.Key.Key_F:
+            self._service.flip_board()
+        elif key == Qt.Key.Key_Left:
+            self._service.step_backward()
+        elif key == Qt.Key.Key_Right:
+            self._service.step_forward()
+        elif key == Qt.Key.Key_Home:
+            self._service.go_to_start()
+        elif key == Qt.Key.Key_End:
+            self._service.go_to_live()
+        elif key == Qt.Key.Key_Z and (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            self._service.undo_move()
+        else:
+            super().keyPressEvent(event)
 
     def _load_piece_renderers(self) -> None:
         pieces = [
@@ -203,6 +241,15 @@ class BoardWidget(QWidget):
         self._drag_current_pos = None
         self._drag_square = None
 
+    def clear_selection(self) -> None:
+        """Clear currently selected square and legal targets."""
+        self._selected_square = None
+        self._legal_targets.clear()
+        self._is_dragging = False
+        self._drag_square = None
+        self._drag_start_pos = None
+        self.update()
+
     def _handle_move_attempt(self, from_sq: str, to_sq: str) -> None:
         """Handle move attempt, prompting for branching confirmation if in review mode."""
         if self._service.is_reviewing:
@@ -230,12 +277,14 @@ class BoardWidget(QWidget):
 
         offset_x, offset_y, sq_size = self._board_rect()
         state = self._service.get_state()
+        light_sq = QColor(self._theme.light_square)
+        dark_sq = QColor(self._theme.dark_square)
 
         # 1. Draw 64 squares
         for row in range(8):
             for col in range(8):
                 is_light = (row + col) % 2 == 0
-                color = self.LIGHT_SQUARE if is_light else self.DARK_SQUARE
+                color = light_sq if is_light else dark_sq
                 rect = QRectF(offset_x + col * sq_size, offset_y + row * sq_size, sq_size, sq_size)
                 painter.fillRect(rect, color)
 
@@ -252,7 +301,7 @@ class BoardWidget(QWidget):
                 sq_size * 0.25,
             )
             is_light_bottom = (7 + i) % 2 == 0
-            painter.setPen(self.DARK_SQUARE if is_light_bottom else self.LIGHT_SQUARE)
+            painter.setPen(dark_sq if is_light_bottom else light_sq)
             painter.drawText(file_rect, Qt.AlignmentFlag.AlignCenter, file_char)
 
             # Ranks (left edge)
@@ -264,7 +313,7 @@ class BoardWidget(QWidget):
                 sq_size * 0.25,
             )
             is_light_left = (i + 0) % 2 == 0
-            painter.setPen(self.DARK_SQUARE if is_light_left else self.LIGHT_SQUARE)
+            painter.setPen(dark_sq if is_light_left else light_sq)
             painter.drawText(
                 rank_rect, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft, rank_char
             )
@@ -300,9 +349,9 @@ class BoardWidget(QWidget):
                 painter.drawEllipse(t_rect.center(), radius, radius)
                 # Clear inner area to form ring
                 inner_color = (
-                    self.LIGHT_SQUARE
+                    light_sq
                     if (int(t_rect.x() // sq_size) + int(t_rect.y() // sq_size)) % 2 == 0
-                    else self.DARK_SQUARE
+                    else dark_sq
                 )
                 painter.setBrush(inner_color)
                 painter.drawEllipse(

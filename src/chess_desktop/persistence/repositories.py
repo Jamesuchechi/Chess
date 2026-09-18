@@ -6,6 +6,7 @@ from chess_desktop.domain.enums import Color, GameStatus
 from chess_desktop.domain.game import Game
 from chess_desktop.domain.game_state import MoveRecord
 from chess_desktop.domain.player import Player
+from chess_desktop.domain.time_control import TimeControl
 from chess_desktop.persistence.database import DatabaseManager
 from chess_desktop.persistence.models import SavedGameRecord, SavedGameSummary
 
@@ -43,8 +44,9 @@ class GameRepository:
                 """
                 INSERT INTO games (
                     id, title, white_name, black_name, status, result,
-                    fen, pgn, moves_uci, move_count, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    fen, pgn, moves_uci, move_count, created_at, updated_at,
+                    white_time_ms, black_time_ms, time_control
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     title = excluded.title,
                     white_name = excluded.white_name,
@@ -55,7 +57,10 @@ class GameRepository:
                     pgn = excluded.pgn,
                     moves_uci = excluded.moves_uci,
                     move_count = excluded.move_count,
-                    updated_at = excluded.updated_at;
+                    updated_at = excluded.updated_at,
+                    white_time_ms = excluded.white_time_ms,
+                    black_time_ms = excluded.black_time_ms,
+                    time_control = excluded.time_control;
                 """,
                 (
                     record.game_id,
@@ -70,6 +75,9 @@ class GameRepository:
                     record.move_count,
                     record.created_at,
                     record.updated_at,
+                    record.white_time_ms,
+                    record.black_time_ms,
+                    record.time_control,
                 ),
             )
         return record.game_id
@@ -80,6 +88,10 @@ class GameRepository:
             row = conn.execute("SELECT * FROM games WHERE id = ?", (game_id,)).fetchone()
             if not row:
                 return None
+
+        white_ms = int(row["white_time_ms"]) if row["white_time_ms"] is not None else None
+        black_ms = int(row["black_time_ms"]) if row["black_time_ms"] is not None else None
+        tc_str = str(row["time_control"]) if row["time_control"] is not None else ""
 
         record = SavedGameRecord(
             game_id=str(row["id"]),
@@ -94,6 +106,9 @@ class GameRepository:
             move_count=int(row["move_count"]),
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
+            white_time_ms=white_ms,
+            black_time_ms=black_ms,
+            time_control=tc_str,
         )
 
         # Replay moves to reconstruct verified domain Game
@@ -108,11 +123,15 @@ class GameRepository:
                 last_move = (rec.from_square, rec.to_square)
 
         status_enum = GameStatus[record.status] if record.status in GameStatus.__members__ else None
+        time_control = TimeControl.from_pgn_tag(tc_str) if tc_str else None
         state = MoveService.build_game_state(
             board=board,
             last_move=last_move,
             moves=moves,
             status_override=status_enum,
+            white_time_ms=white_ms,
+            black_time_ms=black_ms,
+            time_control=time_control,
         )
 
         white_player = Player(record.white_name, Color.WHITE)

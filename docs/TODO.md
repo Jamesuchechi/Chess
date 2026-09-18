@@ -66,14 +66,14 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done
 
 ## Phase 4 — Engine (Stockfish)
 
-- [ ] `engine/engine.py` — `ChessEngine` abstract interface
-- [ ] `engine/stockfish.py` — UCI process management, isolated behind the interface
-- [ ] Engine auto-discovery probing standard system paths (`/usr/bin/stockfish`, `/usr/games/stockfish`, Windows Program Files)
-- [ ] Engine runs on a worker thread — **verify the UI never freezes while it's thinking**
-- [ ] Search cancellation protocol: immediately send UCI `stop` and discard results if player undos, resigns, or starts new game
-- [ ] `engine/difficulty.py` — Beginner→Expert mapped to depth/skill-level/time, no raw UCI params in the UI
-- [ ] New Game dialog: Player vs Computer, color choice, difficulty
-- [ ] Graceful failure when Stockfish isn't installed/found (human-readable error dialog, custom path browse button, local play unaffected)
+- [x] `engine/engine.py` — `ChessEngine` abstract interface
+- [x] `engine/stockfish.py` — UCI process management, isolated behind the interface
+- [x] Engine auto-discovery probing standard system paths (`/usr/bin/stockfish`, `/usr/games/stockfish`, Windows Program Files)
+- [x] Engine runs on a worker thread — **verify the UI never freezes while it's thinking**
+- [x] Search cancellation protocol: immediately send UCI `stop` and discard results if player undos, resigns, or starts new game
+- [x] `engine/difficulty.py` — Beginner→Expert mapped to depth/skill-level/time, no raw UCI params in the UI
+- [x] New Game dialog: Player vs Computer, color choice, difficulty
+- [x] Graceful failure when Stockfish isn't installed/found (human-readable error dialog, custom path browse button, local play unaffected)
 
 **Deliverable:** Human vs Computer, all difficulty levels, UI stays responsive during engine search and search aborts cleanly on user interruption.
 
@@ -81,10 +81,10 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done
 
 ## Phase 5 — Clock
 
-- [ ] Monotonic clock implementation (not wall-clock timestamps)
-- [ ] Time control presets (Unlimited, 1+0, 3+0, 3+2, 5+0, 10+0, 10+5, 15+10, 30+0)
-- [ ] Increment handling, switch-on-move, timeout → loss
-- [ ] Clock state persisted in saved games
+- [x] Monotonic clock implementation (not wall-clock timestamps)
+- [x] Time control presets (Unlimited, 1+0, 3+0, 3+2, 5+0, 10+0, 10+5, 15+10, 30+0)
+- [x] Increment handling, switch-on-move, timeout → loss
+- [x] Clock state persisted in saved games
 
 **Deliverable:** timed games work correctly, including on save/resume.
 
@@ -92,16 +92,16 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done
 
 ## Phase 6 — Polish & Packaging
 
-- [ ] Board themes (Classic, Wood, Modern, Minimal, High Contrast)
-- [ ] Multiple piece sets
-- [ ] Sound effects (move, capture, check, castle, promotion, game start/end) with mute
-- [ ] Audio fallback: graceful degradation if Linux GStreamer/PulseAudio drivers are missing
-- [ ] Settings dialog (appearance, board, pieces, sound, engine path)
-- [ ] Keyboard shortcut pass (Ctrl+N/O/S/Z/E, F, Esc, arrows, Home/End)
-- [ ] Accessibility pass (focus states, contrast, no color-only state)
-- [ ] PyInstaller build for Linux
-- [ ] PyInstaller build for Windows
-- [ ] Clean-install verification on both platforms
+- [x] Board themes (Classic, Wood, Modern, Minimal, High Contrast)
+- [x] Multiple piece sets
+- [x] Sound effects (move, capture, check, castle, promotion, game start/end) with mute
+- [x] Audio fallback: graceful degradation if Linux GStreamer/PulseAudio drivers are missing
+- [x] Settings dialog (appearance, board, pieces, sound, engine path)
+- [x] Keyboard shortcut pass (Ctrl+N/O/S/Z/E, F, Esc, arrows, Home/End)
+- [x] Accessibility pass (focus states, contrast, no color-only state)
+- [x] PyInstaller build for Linux
+- [x] PyInstaller build for Windows
+- [x] Clean-install verification on both platforms
 
 **Deliverable:** `1.0.0` release candidate.
 
