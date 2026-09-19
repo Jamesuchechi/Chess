@@ -92,12 +92,12 @@ class Difficulty(Enum):
         """Realistic thinking delay range in ms (min_ms, max_ms) to simulate human ponder time."""
         match self:
             case Difficulty.BEGINNER:
-                return (1200, 2000)
+                return (1000, 1600)
             case Difficulty.CASUAL:
-                return (1500, 2400)
+                return (1100, 1800)
             case Difficulty.INTERMEDIATE:
-                return (2000, 3000)
+                return (1200, 2000)
             case Difficulty.ADVANCED:
-                return (2200, 3500)
+                return (1400, 2200)
             case Difficulty.MASTER:
-                return (2500, 4000)
+                return (1500, 2500)

@@ -46,6 +46,20 @@ echo "  Installing Chess Desktop for $(whoami)"
 echo "  Project Root: ${PROJECT_ROOT}"
 echo "======================================================"
 
+# 0. Clean old python caches and rebuild Qt resources
+echo "Clearing Python bytecode cache..."
+find "${PROJECT_ROOT}" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+rm -rf "${PROJECT_ROOT}/.pytest_cache" "${PROJECT_ROOT}/.mypy_cache" 2>/dev/null || true
+
+echo "Recompiling Qt resources..."
+if command -v uv >/dev/null 2>&1; then
+    uv run python "${SCRIPT_DIR}/compile_resources.py" || true
+elif [ -x "${PROJECT_ROOT}/.venv/bin/python" ]; then
+    "${PROJECT_ROOT}/.venv/bin/python" "${SCRIPT_DIR}/compile_resources.py" || true
+elif command -v python3 >/dev/null 2>&1; then
+    python3 "${SCRIPT_DIR}/compile_resources.py" || true
+fi
+
 # 1. Create target directories
 mkdir -p "${BIN_DIR}"
 mkdir -p "${APP_DIR}"
@@ -70,6 +84,7 @@ set -e
 
 PROJECT_DIR="${PROJECT_ROOT}"
 cd "\${PROJECT_DIR}"
+export PYTHONPATH="\${PROJECT_DIR}/src:\${PYTHONPATH:-}"
 
 if [ -x "${VENV_PYTHON}" ]; then
     exec "${VENV_PYTHON}" -m chess_desktop.main "\$@"

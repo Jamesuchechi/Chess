@@ -56,6 +56,7 @@ class BoardWidget(QWidget):
         self._drag_start_pos: QPoint | None = None
         self._drag_current_pos: QPoint | None = None
         self._drag_square: str | None = None
+        self._skip_next_animation: bool = False
 
         # Active move animations (dict list: {anim, piece, to_sq, current_pos})
         self._animations: list[dict[str, Any]] = []
@@ -197,6 +198,7 @@ class BoardWidget(QWidget):
         self._selected_square = None
         self._legal_targets.clear()
         self._is_dragging = False
+        self._skip_next_animation = False
         self.update()
 
     def _on_review_changed(self, ply: int | None) -> None:
@@ -236,6 +238,9 @@ class BoardWidget(QWidget):
 
     def _on_move_made(self, record: MoveRecord) -> None:
         """Animate piece movement smoothly between squares."""
+        skip_primary = self._skip_next_animation
+        self._skip_next_animation = False
+
         if not self.isVisible() or self.width() < 100 or self.height() < 100:
             self.update()
             return
@@ -246,10 +251,11 @@ class BoardWidget(QWidget):
             self.update()
             return
 
-        # Handle castling (both King and Rook animate)
+        # Handle castling (both King and Rook animate, or just Rook if King was directly dragged)
         if record.san in ("O-O", "O-O-O") or record.uci in ("e1g1", "e1c1", "e8g8", "e8c8"):
-            # Animate King
-            self._start_piece_animation(record.from_square, record.to_square, piece_info)
+            if not skip_primary:
+                # Animate King
+                self._start_piece_animation(record.from_square, record.to_square, piece_info)
             # Animate corresponding Rook
             rook_color = piece_info[1]
             if record.uci in ("e1g1", "e8g8") or record.san == "O-O":
@@ -264,7 +270,10 @@ class BoardWidget(QWidget):
             rook_piece = (PieceType.ROOK, rook_color)
             self._start_piece_animation(r_from, r_to, rook_piece)
         else:
-            self._start_piece_animation(record.from_square, record.to_square, piece_info)
+            if not skip_primary:
+                self._start_piece_animation(record.from_square, record.to_square, piece_info)
+            else:
+                self.update()
 
     def _start_piece_animation(
         self,
@@ -435,6 +444,7 @@ class BoardWidget(QWidget):
                 self._drag_start_pos = None
                 self._drag_current_pos = None
                 self._drag_square = None
+                self._skip_next_animation = True
                 self._handle_move_attempt(from_sq, target_sq)
                 self.update()
                 return
