@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QFrame,
@@ -18,7 +18,7 @@ from chess_desktop.services.game_service import GameService
 
 
 class HistoryPanel(QWidget):
-    """Panel containing match info, scrollable move history table, and game actions."""
+    """Panel containing match info, engine thinking animation, move history table, and game actions."""
 
     new_game_requested = Signal()
 
@@ -28,6 +28,11 @@ class HistoryPanel(QWidget):
         self.setMinimumWidth(240)
         self.setMaximumWidth(300)
 
+        self._anim_frame = 0
+        self._anim_timer = QTimer(self)
+        self._anim_timer.setInterval(350)
+        self._anim_timer.timeout.connect(self._on_thinking_tick)
+
         self._init_ui()
 
         self._service.state_changed.connect(self.update_history)
@@ -35,6 +40,7 @@ class HistoryPanel(QWidget):
         self._service.review_changed.connect(
             lambda _: self.update_history(self._service.get_state())
         )
+        self._service.engine_thinking_changed.connect(self._on_engine_thinking_changed)
         self.update_history(self._service.get_state())
 
     def _init_ui(self) -> None:
@@ -70,6 +76,36 @@ class HistoryPanel(QWidget):
         )
         card_layout.addWidget(self._match_opponent_lbl)
         layout.addWidget(self._match_card)
+
+        # Engine Thinking Visual Indicator Card
+        self._thinking_card = QFrame(self)
+        self._thinking_card.setStyleSheet(
+            """
+            QFrame {
+                background-color: #2b2814;
+                border: 1px solid #856f14;
+                border-radius: 6px;
+                padding: 4px 8px;
+            }
+            """
+        )
+        think_layout = QHBoxLayout(self._thinking_card)
+        think_layout.setContentsMargins(8, 6, 8, 6)
+        think_layout.setSpacing(8)
+
+        self._thinking_icon = QLabel("⚡", self._thinking_card)
+        self._thinking_icon.setStyleSheet("font-size: 13px; border: none; background: transparent;")
+        think_layout.addWidget(self._thinking_icon)
+
+        self._thinking_lbl = QLabel("Engine thinking...", self._thinking_card)
+        self._thinking_lbl.setStyleSheet(
+            "font-size: 12px; font-weight: bold; color: #facc15; border: none; background: transparent;"
+        )
+        think_layout.addWidget(self._thinking_lbl)
+        think_layout.addStretch()
+
+        self._thinking_card.hide()
+        layout.addWidget(self._thinking_card)
 
         # Move Table Header
         title = QLabel("Move History", self)
@@ -112,15 +148,36 @@ class HistoryPanel(QWidget):
 
         # Action buttons
         btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(8)
+        btn_layout.setSpacing(6)
 
-        flip_btn = QPushButton("Flip Board", self)
+        hint_btn = QPushButton("💡 Hint", self)
+        hint_btn.setStyleSheet(
+            """
+            QPushButton {
+                background-color: #2b2b2b;
+                color: #38bdf8;
+                border: 1px solid #0284c7;
+                padding: 6px 10px;
+                border-radius: 4px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #0369a1;
+                color: #ffffff;
+            }
+            """
+        )
+        hint_btn.clicked.connect(self._service.request_hint)
+        btn_layout.addWidget(hint_btn)
+
+        flip_btn = QPushButton("Flip", self)
         flip_btn.setStyleSheet(
             """
             QPushButton {
                 background-color: #383838;
                 color: #ffffff;
-                padding: 6px 12px;
+                padding: 6px 10px;
                 border-radius: 4px;
                 font-size: 12px;
             }
@@ -132,13 +189,13 @@ class HistoryPanel(QWidget):
         flip_btn.clicked.connect(self._service.flip_board)
         btn_layout.addWidget(flip_btn)
 
-        new_btn = QPushButton("New Game", self)
+        new_btn = QPushButton("New", self)
         new_btn.setStyleSheet(
             """
             QPushButton {
                 background-color: #769656;
                 color: #ffffff;
-                padding: 6px 12px;
+                padding: 6px 10px;
                 border-radius: 4px;
                 font-size: 12px;
                 font-weight: bold;
@@ -152,6 +209,24 @@ class HistoryPanel(QWidget):
         btn_layout.addWidget(new_btn)
 
         layout.addLayout(btn_layout)
+
+    def _on_engine_thinking_changed(self, is_thinking: bool) -> None:
+        """Show or hide animated engine thinking card."""
+        if is_thinking:
+            self._anim_frame = 0
+            self._thinking_lbl.setText("Engine thinking •")
+            self._thinking_card.show()
+            self._anim_timer.start()
+        else:
+            self._anim_timer.stop()
+            self._thinking_card.hide()
+
+    def _on_thinking_tick(self) -> None:
+        self._anim_frame = (self._anim_frame + 1) % 4
+        dots = "•" * (self._anim_frame + 1)
+        icons = ["⚡", "⏳", "✨", "🧠"]
+        self._thinking_icon.setText(icons[self._anim_frame])
+        self._thinking_lbl.setText(f"Engine thinking {dots}")
 
     def _on_cell_clicked(self, row: int, col: int) -> None:
         moves = self._service.get_state().moves
@@ -173,8 +248,12 @@ class HistoryPanel(QWidget):
     def update_history(self, state: GameState) -> None:
         """Repopulate move history table and match info from GameState."""
         game = self._service.get_game()
-        is_comp = self._service.is_vs_computer
-        if is_comp:
+        if self._service.is_lan_game:
+            self._match_mode_lbl.setText("🌐 LAN Multiplayer")
+            self._match_opponent_lbl.setText(
+                f"{game.white_player.name} vs {game.black_player.name}"
+            )
+        elif self._service.is_vs_computer:
             self._match_mode_lbl.setText("🤖 Play vs Computer")
             comp_player = (
                 game.black_player

@@ -24,6 +24,7 @@ from chess_desktop.ui.board.history_panel import HistoryPanel
 from chess_desktop.ui.board.navigation_bar import NavigationBar
 from chess_desktop.ui.dialogs.confirm_dialog import ConfirmDialog
 from chess_desktop.ui.dialogs.game_over_dialog import GameOverDialog
+from chess_desktop.ui.dialogs.lan_game_dialog import LanGameDialog
 from chess_desktop.ui.dialogs.new_game_dialog import NewGameDialog
 from chess_desktop.ui.dialogs.open_game_dialog import OpenGameDialog
 from chess_desktop.ui.dialogs.promotion_dialog import PromotionDialog
@@ -109,6 +110,10 @@ class MainWindow(QMainWindow):
         action_new.triggered.connect(self._handle_new_game)
         file_menu.addAction(action_new)
 
+        self._action_lan = QAction("&LAN Multiplayer...", self)
+        self._action_lan.triggered.connect(self._handle_lan_multiplayer)
+        file_menu.addAction(self._action_lan)
+
         self._action_open = QAction("&Open Game...", self)
         self._action_open.setShortcut(QKeySequence.StandardKey.Open)
         self._action_open.triggered.connect(self._handle_open_game)
@@ -154,6 +159,15 @@ class MainWindow(QMainWindow):
         action_undo.setShortcut(QKeySequence.StandardKey.Undo)
         action_undo.triggered.connect(self._service.undo_move)
         edit_menu.addAction(action_undo)
+
+        action_hint = QAction("💡 &Get Best Move Hint", self)
+        action_hint.setShortcut(QKeySequence("H"))
+        action_hint.triggered.connect(self._service.request_hint)
+        edit_menu.addAction(action_hint)
+
+        action_restart_engine = QAction("&Restart Chess Engine", self)
+        action_restart_engine.triggered.connect(self._handle_restart_engine)
+        edit_menu.addAction(action_restart_engine)
 
         # View menu
         view_menu = menu_bar.addMenu("&View")
@@ -246,6 +260,12 @@ class MainWindow(QMainWindow):
         self._service.move_made.connect(self._sound_service.play_move_record)
         self._service.state_changed.connect(self._handle_state_changed)
         self._service.engine_thinking_changed.connect(self._handle_engine_thinking_changed)
+        self._service.engine_error.connect(self._handle_engine_error)
+        self._service.hint_received.connect(self._handle_hint_received)
+        self._service.lan_connected.connect(self._handle_lan_connected)
+        self._service.lan_disconnected.connect(self._handle_lan_disconnected)
+        self._service.lan_error.connect(self._handle_lan_error)
+        self._service.lan_draw_offered.connect(self._handle_lan_draw_offered)
         self._save_service.dirty_changed.connect(lambda _: self._update_window_title())
         self._save_service.game_saved.connect(lambda _: self._update_window_title())
         self._save_service.game_loaded.connect(lambda _: self._update_window_title())
@@ -467,3 +487,72 @@ class MainWindow(QMainWindow):
             self._status_bar.showMessage(f"Check! {turn_str} to move.")
         else:
             self._status_bar.showMessage(f"{turn_str} to move. Move {state.move_number}")
+
+    def _handle_engine_error(self, message: str) -> None:
+        """Surface engine failure to status bar."""
+        self._status_bar.showMessage(f"Engine error: {message}. Select Edit -> Restart Chess Engine.")
+
+    def _handle_restart_engine(self) -> None:
+        """Restart engine backend cleanly and update status."""
+        self._service.restart_engine()
+        self._status_bar.showMessage("Engine restarted successfully.")
+
+    def _handle_lan_multiplayer(self) -> None:
+        """Open LAN multiplayer setup dialog and host or join match."""
+        if self._save_service.has_unsaved_changes:
+            dlg = ConfirmDialog(
+                title="Start LAN Multiplayer?",
+                message="You have unsaved changes in this game.\n\nDiscard changes and start LAN game?",
+                confirm_text="Discard & Start",
+                cancel_text="Cancel",
+                is_destructive=True,
+                parent=self,
+            )
+            if not dlg.exec():
+                return
+
+        lan_dlg = LanGameDialog(game_service=self._service, parent=self)
+        if not lan_dlg.exec():
+            # If user dismissed the dialog without connecting, clean up
+            if self._service.is_lan_game and not (self._service._lan_transport and self._service._lan_transport.is_connected):
+                self._service.disconnect_lan()
+            return
+
+        self._save_service.reset_tracking()
+        self._update_window_title()
+
+    def _handle_lan_connected(self, opponent_name: str) -> None:
+        """Handle successful LAN peer connection."""
+        self._status_bar.showMessage(f"LAN Connected! Playing vs {opponent_name}.")
+        self._sound_service.play_game_start()
+        self._update_window_title()
+
+    def _handle_lan_disconnected(self, reason: str) -> None:
+        """Handle LAN peer disconnection."""
+        self._status_bar.showMessage(f"LAN Disconnected: {reason}")
+
+    def _handle_lan_error(self, error: str) -> None:
+        """Handle LAN network error."""
+        self._status_bar.showMessage(f"LAN Error: {error}")
+
+    def _handle_lan_draw_offered(self) -> None:
+        """Prompt user when remote opponent offers a draw."""
+        dlg = ConfirmDialog(
+            title="Draw Offered",
+            message="Your opponent has offered a draw.\n\nDo you accept?",
+            confirm_text="Accept Draw",
+            cancel_text="Decline",
+            is_destructive=False,
+            parent=self,
+        )
+        accepted = bool(dlg.exec())
+        self._service.send_lan_draw_response(accepted)
+        if accepted:
+            self._status_bar.showMessage("You accepted the draw offer.")
+        else:
+            self._status_bar.showMessage("You declined the draw offer.")
+
+    def _handle_hint_received(self, from_sq: str, to_sq: str, san: str) -> None:
+        """Display suggested best move in the status bar."""
+        self._status_bar.showMessage(f"💡 Best move hint: {san} ({from_sq} ➔ {to_sq})")
+

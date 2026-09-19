@@ -79,3 +79,47 @@ def test_vs_computer_blocks_move_during_thinking(qtbot: QtBot) -> None:
 
     service._is_engine_thinking = False
     service.cleanup()
+
+
+def test_vs_computer_propagates_engine_error(qtbot: QtBot) -> None:
+    """Verify GameService re-emits engine_error and clears thinking state."""
+    class FailingEngine(FallbackEngine):
+        def search_best_move(self, *args, **kwargs) -> str:
+            raise RuntimeError("Engine process died")
+
+    worker = EngineWorker(engine=FailingEngine(), thinking_delay_enabled=False)
+    service = GameService(engine_worker=worker)
+
+    with qtbot.waitSignal(service.engine_error, timeout=1000) as blocker:
+        service.new_game(
+            white_name="Human",
+            black_name="Computer",
+            white_type=PlayerType.HUMAN,
+            black_type=PlayerType.COMPUTER,
+        )
+        assert service.try_move("e2", "e4")
+
+    assert blocker.args is not None
+    assert "Engine process died" in blocker.args[0]
+    assert not service.is_computer_thinking
+    service.cleanup()
+
+
+def test_vs_computer_restart_engine(qtbot: QtBot) -> None:
+    """Verify GameService.restart_engine restores engine and triggers move if computer turn."""
+    engine = FallbackEngine()
+    worker = EngineWorker(engine=engine, thinking_delay_enabled=False)
+    service = GameService(engine_worker=worker)
+
+    service.new_game(
+        white_name="Computer",
+        black_name="Human",
+        white_type=PlayerType.COMPUTER,
+        black_type=PlayerType.HUMAN,
+    )
+
+    qtbot.waitUntil(lambda: len(service.get_state().moves) >= 1, timeout=3000)
+    service.restart_engine()
+    assert engine.is_ready()
+    service.cleanup()
+

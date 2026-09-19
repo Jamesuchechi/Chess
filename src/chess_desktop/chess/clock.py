@@ -160,12 +160,27 @@ class ChessClock(QObject):
         self._last_monotonic = None
         self.active_color_changed.emit(None)
 
-    def set_times(self, white_ms: int, black_ms: int) -> None:
+    def set_times(self, white_ms: int | None, black_ms: int | None) -> None:
         """Directly adjust current player times (e.g. restoring state on undo)."""
-        self._white_ms = max(0, white_ms)
-        self._black_ms = max(0, black_ms)
+        self._white_ms = max(0, white_ms if white_ms is not None else 0)
+        self._black_ms = max(0, black_ms if black_ms is not None else 0)
         if self._is_running:
             self._last_monotonic = time.monotonic()
+        self.tick.emit(self._white_ms, self._black_ms)
+
+    def set_times_and_turn(
+        self, white_ms: int | None, black_ms: int | None, active_turn: Color
+    ) -> None:
+        """Explicitly restore clocks and set active turn without deducting time or crediting increment."""
+        self._white_ms = max(0, white_ms if white_ms is not None else 0)
+        self._black_ms = max(0, black_ms if black_ms is not None else 0)
+        self._active_color = active_turn
+        if not self._time_control.is_unlimited:
+            self._last_monotonic = time.monotonic()
+            if not self._is_running:
+                self._is_running = True
+                self._timer.start()
+        self.active_color_changed.emit(self._active_color)
         self.tick.emit(self._white_ms, self._black_ms)
 
     def _on_timer_tick(self) -> None:

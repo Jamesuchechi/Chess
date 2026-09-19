@@ -20,6 +20,7 @@ class EngineWorker(QObject):
     """Executes chess engine calculations on a dedicated worker thread."""
 
     best_move_found = Signal(str)  # UCI move (e.g. 'e7e5')
+    hint_found = Signal(str)  # UCI hint move
     search_started = Signal()
     search_stopped = Signal()
     engine_error = Signal(str)
@@ -168,6 +169,25 @@ class EngineWorker(QObject):
         finally:
             self.search_stopped.emit()
 
+    @Slot(str, list)
+    def request_hint(self, fen: str, moves_uci: list[str]) -> None:
+        """Perform fast master-level search to find best suggestion for human player."""
+        self._is_cancelled = False
+        try:
+            self.search_started.emit()
+            self._engine.set_position(fen=fen, moves_uci=moves_uci)
+            # Use high skill and fixed depth evaluation for instant hints
+            move = self._engine.search_best_move(depth=12, skill_level=20)
+            if not self.is_cancelled and move:
+                self.hint_found.emit(move)
+        except SearchCancelledError:
+            logger.debug("Hint search cancelled.")
+        except Exception as e:
+            logger.error("Engine hint search error: %s", e)
+            self.engine_error.emit(str(e))
+        finally:
+            self.search_stopped.emit()
+
     @Slot()
     def cancel_search(self) -> None:
         """Interrupt any ongoing engine calculation."""
@@ -176,3 +196,20 @@ class EngineWorker(QObject):
             self._engine.stop()
         except Exception as e:
             logger.debug("Error stopping engine: %s", e)
+
+    @Slot()
+    def restart_engine(self) -> None:
+        """Restart the underlying engine process cleanly."""
+        self.cancel_search()
+        try:
+            self._engine.quit()
+        except Exception as e:
+            logger.debug("Engine quit exception during restart: %s", e)
+
+        try:
+            self._engine.start()
+            logger.info("Engine restarted successfully.")
+        except Exception as e:
+            logger.error("Failed to restart engine: %s", e)
+            self.engine_error.emit(f"Engine restart failed: {e}")
+

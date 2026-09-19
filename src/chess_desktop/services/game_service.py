@@ -2,6 +2,7 @@ import dataclasses
 import logging
 from typing import Any
 
+import chess
 from PySide6.QtCore import QObject, Signal
 
 from chess_desktop.chess.board import ChessBoard
@@ -13,13 +14,15 @@ from chess_desktop.domain.game_state import GameState, MoveRecord
 from chess_desktop.domain.player import Player
 from chess_desktop.domain.time_control import TimeControl
 from chess_desktop.engine.difficulty import Difficulty
+from chess_desktop.network.lan_transport import LanTransport
+from chess_desktop.network.protocol import MessageType, NetworkMessage
 from chess_desktop.services.engine_worker import EngineWorker
 
 logger = logging.getLogger(__name__)
 
 
 class GameService(QObject):
-    """Central orchestrator for active chess matches."""
+    """Central orchestrator for active chess matches, engine calculations, and LAN multiplayer."""
 
     # Qt Signals
     state_changed = Signal(object)  # GameState
@@ -29,8 +32,18 @@ class GameService(QObject):
     promotion_requested = Signal(str, str)  # (from_sq, to_sq)
     review_changed = Signal(object)  # int | None
     engine_thinking_changed = Signal(bool)  # is_thinking
+    engine_error = Signal(str)  # error_message
+    hint_received = Signal(str, str, str)  # (from_sq, to_sq, san)
+    hint_cleared = Signal()
     clock_ticked = Signal(int, int)  # (white_ms, black_ms)
     clock_timeout = Signal(object)  # (Color)
+
+    # LAN Multiplayer Signals
+    lan_connected = Signal(str)  # peer_address
+    lan_disconnected = Signal(str)  # reason
+    lan_peer_joined = Signal(str)  # peer_name
+    lan_draw_offered = Signal()
+    lan_error = Signal(str)
 
     def __init__(
         self,
@@ -51,9 +64,16 @@ class GameService(QObject):
 
         self._difficulty: Difficulty = Difficulty.INTERMEDIATE
         self._is_engine_thinking = False
+        self._active_hint: tuple[str, str, str] | None = None
         self._engine_worker: EngineWorker | None = None
         if engine_worker is not None:
             self.set_engine_worker(engine_worker)
+
+        # LAN Multiplayer State
+        self._is_lan_game = False
+        self._lan_transport: LanTransport | None = None
+        self._local_player_color = Color.WHITE
+        self._local_player_name = "Player"
 
         self._white_player = Player("Player", Color.WHITE, player_type=PlayerType.HUMAN)
         self._black_player = Player(
@@ -109,10 +129,25 @@ class GameService(QObject):
     @property
     def is_vs_computer(self) -> bool:
         """True if either side is controlled by a computer engine."""
-        return (
+        return not self._is_lan_game and (
             self._white_player.player_type == PlayerType.COMPUTER
             or self._black_player.player_type == PlayerType.COMPUTER
         )
+
+    @property
+    def is_lan_game(self) -> bool:
+        """True if active match is played over LAN networking."""
+        return self._is_lan_game
+
+    @property
+    def is_lan_host(self) -> bool:
+        """True if hosting the LAN match."""
+        return self._is_lan_game and self._lan_transport is not None and self._lan_transport.is_host
+
+    @property
+    def local_player_color(self) -> Color:
+        """The local human player's assigned color in LAN multiplayer."""
+        return self._local_player_color
 
     @property
     def is_computer_thinking(self) -> bool:
@@ -131,9 +166,51 @@ class GameService(QObject):
 
         self._engine_worker = worker
         self._engine_worker.best_move_found.connect(self._on_engine_move)
+        self._engine_worker.hint_found.connect(self._on_engine_hint)
         self._engine_worker.search_started.connect(self._on_search_started)
         self._engine_worker.search_stopped.connect(self._on_search_stopped)
+        self._engine_worker.engine_error.connect(self._on_engine_error)
         self._engine_worker.start_worker()
+
+    @property
+    def active_hint(self) -> tuple[str, str, str] | None:
+        """Current active best move suggestion (from_sq, to_sq, san)."""
+        return self._active_hint
+
+    def request_hint(self) -> bool:
+        """Request the engine to compute the top recommended move."""
+        if self._is_engine_thinking or self.is_reviewing:
+            return False
+
+        state = self.get_state()
+        if state.status.is_game_over:
+            return False
+
+        worker = self.ensure_engine_worker()
+        moves_uci = [m.uci for m in self._moves]
+        worker.request_hint(state.fen, moves_uci)
+        return True
+
+    def clear_hint(self) -> None:
+        """Dismiss the active hint overlay."""
+        if self._active_hint is not None:
+            self._active_hint = None
+            self.hint_cleared.emit()
+
+    def _on_engine_hint(self, uci_move: str) -> None:
+        """Process hint returned by engine worker."""
+        if not uci_move or len(uci_move) < 4:
+            return
+        from_sq = uci_move[:2]
+        to_sq = uci_move[2:4]
+        try:
+            move_obj = chess.Move.from_uci(uci_move)
+            san = self._board._board.san(move_obj)
+        except Exception:
+            san = uci_move
+
+        self._active_hint = (from_sq, to_sq, san)
+        self.hint_received.emit(from_sq, to_sq, san)
 
     def ensure_engine_worker(self) -> EngineWorker:
         """Ensure an EngineWorker is initialized and started."""
@@ -149,6 +226,21 @@ class GameService(QObject):
             self._engine_worker.cancel_search()
         self._is_engine_thinking = False
         self.engine_thinking_changed.emit(False)
+
+    def restart_engine(self) -> None:
+        """Restart engine backend and re-trigger calculation if needed."""
+        self._is_engine_thinking = False
+        self.engine_thinking_changed.emit(False)
+        worker = self.ensure_engine_worker()
+        worker.restart_engine()
+        self._trigger_engine_if_needed()
+
+    def _on_engine_error(self, error_message: str) -> None:
+        """Handle engine execution failure or process crash."""
+        logger.error("Engine failure reported: %s", error_message)
+        self._is_engine_thinking = False
+        self.engine_thinking_changed.emit(False)
+        self.engine_error.emit(error_message)
 
     def _on_search_started(self) -> None:
         self._is_engine_thinking = True
@@ -187,8 +279,8 @@ class GameService(QObject):
 
     @property
     def can_undo(self) -> bool:
-        """True if a move can be undone."""
-        return len(self._moves) > 0 and not self.get_state().status.is_game_over
+        """True if a move can be undone (disabled in LAN multiplayer)."""
+        return not self._is_lan_game and len(self._moves) > 0 and not self.get_state().status.is_game_over
 
     def new_game(
         self,
@@ -199,7 +291,9 @@ class GameService(QObject):
         difficulty: Difficulty = Difficulty.INTERMEDIATE,
         time_control: TimeControl | None = None,
     ) -> None:
-        """Reset and start a new game."""
+        """Reset and start a new local / computer game."""
+        self.clear_hint()
+        self.disconnect_lan()
         self.cancel_engine_search()
         self._difficulty = difficulty
         tc = time_control or TimeControl.unlimited()
@@ -251,6 +345,307 @@ class GameService(QObject):
         if self.is_vs_computer:
             self._trigger_engine_if_needed()
 
+    # LAN Multiplayer Orchestration
+    def host_lan_game(
+        self,
+        port: int = 5000,
+        player_name: str = "Host",
+        host_color: Color = Color.WHITE,
+        time_control: TimeControl | None = None,
+    ) -> bool:
+        """Initialize and host a LAN multiplayer match."""
+        self.disconnect_lan()
+        self.cancel_engine_search()
+
+        self._is_lan_game = True
+        self._local_player_color = host_color
+        self._local_player_name = player_name
+        tc = time_control or TimeControl.unlimited()
+
+        self._board.reset()
+        self._moves.clear()
+        self._last_move = None
+        self._review_ply = None
+        self._review_board = None
+        self._clock.reset(tc)
+
+        if host_color == Color.WHITE:
+            self._white_player = Player(player_name, Color.WHITE, PlayerType.HUMAN)
+            self._black_player = Player("Waiting for opponent...", Color.BLACK, PlayerType.HUMAN)
+            self._is_flipped = False
+        else:
+            self._white_player = Player("Waiting for opponent...", Color.WHITE, PlayerType.HUMAN)
+            self._black_player = Player(player_name, Color.BLACK, PlayerType.HUMAN)
+            self._is_flipped = True
+
+        state = MoveService.build_game_state(
+            self._board,
+            None,
+            [],
+            white_time_ms=self._clock.white_time_ms,
+            black_time_ms=self._clock.black_time_ms,
+            time_control=tc,
+        )
+        self._game = Game(self._white_player, self._black_player, state=state)
+
+        self._lan_transport = LanTransport(parent=self)
+        self._lan_transport.peer_connected.connect(self._on_lan_peer_connected)
+        self._lan_transport.peer_disconnected.connect(self._on_lan_peer_disconnected)
+        self._lan_transport.message_received.connect(self._on_lan_message_received)
+        self._lan_transport.connection_error.connect(self._on_lan_connection_error)
+
+        success = self._lan_transport.start_server(port)
+        if success:
+            self.board_flipped.emit(self._is_flipped)
+            self.review_changed.emit(None)
+            self.state_changed.emit(state)
+        return success
+
+    def join_lan_game(
+        self,
+        host_ip: str,
+        port: int = 5000,
+        player_name: str = "Client",
+    ) -> bool:
+        """Connect as client to a host LAN multiplayer match."""
+        self.disconnect_lan()
+        self.cancel_engine_search()
+
+        self._is_lan_game = True
+        self._local_player_name = player_name
+        self._board.reset()
+        self._moves.clear()
+        self._last_move = None
+        self._review_ply = None
+        self._review_board = None
+
+        self._lan_transport = LanTransport(parent=self)
+        self._lan_transport.peer_connected.connect(self._on_lan_peer_connected)
+        self._lan_transport.peer_disconnected.connect(self._on_lan_peer_disconnected)
+        self._lan_transport.message_received.connect(self._on_lan_message_received)
+        self._lan_transport.connection_error.connect(self._on_lan_connection_error)
+
+        return self._lan_transport.connect_to_host(host_ip, port)
+
+    def disconnect_lan(self) -> None:
+        """Disconnect and tear down LAN transport cleanly."""
+        if self._lan_transport is not None:
+            self._lan_transport.disconnect_all()
+            self._lan_transport.deleteLater()
+            self._lan_transport = None
+        self._is_lan_game = False
+
+    def _on_lan_peer_connected(self, peer_address: str) -> None:
+        logger.info("LAN peer connected: %s", peer_address)
+        self.lan_connected.emit(peer_address)
+
+        # If Host: Send Handshake with match configuration
+        if self.is_lan_host and self._lan_transport is not None:
+            tc = self._clock.time_control or TimeControl.unlimited()
+            msg = NetworkMessage.handshake(
+                player_name=self._local_player_name,
+                host_color=self._local_player_color.value,
+                time_control_name=tc.name,
+                initial_time_ms=tc.total_base_ms,
+                increment_ms=tc.increment_ms,
+            )
+            self._lan_transport.send_message(msg)
+
+    def _on_lan_peer_disconnected(self, reason: str) -> None:
+        logger.info("LAN peer disconnected: %s", reason)
+        self.lan_disconnected.emit(reason)
+
+    def _on_lan_connection_error(self, error_msg: str) -> None:
+        logger.error("LAN transport error: %s", error_msg)
+        self.lan_error.emit(error_msg)
+
+    def _on_lan_message_received(self, msg: NetworkMessage) -> None:
+        """Process incoming LAN network message."""
+        match msg.type:
+            case MessageType.HANDSHAKE:
+                self._handle_lan_handshake(msg.payload)
+            case MessageType.HANDSHAKE_ACK:
+                self._handle_lan_handshake_ack(msg.payload)
+            case MessageType.MOVE:
+                self._handle_lan_move(msg.payload)
+            case MessageType.DRAW_OFFER:
+                self.lan_draw_offered.emit()
+            case MessageType.DRAW_RESPONSE:
+                if msg.payload.get("accept", False):
+                    self.accept_draw()
+            case MessageType.RESIGN:
+                # Opponent resigned -> trigger win for local player
+                opp_color = self._local_player_color.opposite
+                self.resign(opp_color)
+            case MessageType.SYNC_REQUEST:
+                self._handle_lan_sync_request()
+            case MessageType.SYNC_STATE:
+                self._handle_lan_sync_state(msg.payload)
+
+    def _handle_lan_handshake(self, payload: dict[str, Any]) -> None:
+        """Client side: establish game configuration based on host handshake."""
+        host_name = payload.get("player_name", "Host")
+        host_color_str = payload.get("host_color", "white")
+        host_color = Color.WHITE if host_color_str == "white" else Color.BLACK
+
+        tc_name = payload.get("time_control_name", "Untimed")
+        init_ms = payload.get("initial_time_ms", 0)
+        inc_ms = payload.get("increment_ms", 0)
+        tc = TimeControl(tc_name, init_ms, inc_ms)
+
+        self._local_player_color = host_color.opposite
+        self._clock.reset(tc)
+
+        if self._local_player_color == Color.WHITE:
+            self._white_player = Player(self._local_player_name, Color.WHITE, PlayerType.HUMAN)
+            self._black_player = Player(host_name, Color.BLACK, PlayerType.HUMAN)
+            self._is_flipped = False
+        else:
+            self._white_player = Player(host_name, Color.WHITE, PlayerType.HUMAN)
+            self._black_player = Player(self._local_player_name, Color.BLACK, PlayerType.HUMAN)
+            self._is_flipped = True
+
+        state = MoveService.build_game_state(
+            self._board,
+            None,
+            [],
+            white_time_ms=self._clock.white_time_ms,
+            black_time_ms=self._clock.black_time_ms,
+            time_control=tc,
+        )
+        self._game = Game(self._white_player, self._black_player, state=state)
+
+        # Send ACK back to host
+        if self._lan_transport is not None:
+            self._lan_transport.send_message(NetworkMessage.handshake_ack(self._local_player_name))
+
+        self.board_flipped.emit(self._is_flipped)
+        self.review_changed.emit(None)
+        self.state_changed.emit(state)
+        self.lan_peer_joined.emit(host_name)
+
+        if not tc.is_unlimited:
+            self._clock.start(Color.WHITE)
+
+    def _handle_lan_handshake_ack(self, payload: dict[str, Any]) -> None:
+        """Host side: client confirmed handshake."""
+        client_name = payload.get("player_name", "Opponent")
+        if self._local_player_color == Color.WHITE:
+            self._black_player = Player(client_name, Color.BLACK, PlayerType.HUMAN)
+        else:
+            self._white_player = Player(client_name, Color.WHITE, PlayerType.HUMAN)
+
+        self._game.white_player = self._white_player
+        self._game.black_player = self._black_player
+        state = self.get_state()
+        self.state_changed.emit(state)
+        self.lan_peer_joined.emit(client_name)
+
+        tc = self._clock.time_control
+        if tc and not tc.is_unlimited and not self._clock.is_running:
+            self._clock.start(Color.WHITE)
+
+    def _handle_lan_move(self, payload: dict[str, Any]) -> None:
+        """Apply move received from remote opponent."""
+        uci_move = payload.get("uci")
+        if not uci_move:
+            return
+
+        w_time = payload.get("white_time_ms")
+        b_time = payload.get("black_time_ms")
+        if w_time is not None and b_time is not None:
+            self._clock.set_times(w_time, b_time)
+
+        try:
+            record = MoveService.execute_uci(self._board, uci_move)
+        except Exception as e:
+            logger.error("Failed to execute remote LAN move '%s': %s", uci_move, e)
+            return
+
+        record = dataclasses.replace(
+            record,
+            white_time_ms=self._clock.white_time_ms,
+            black_time_ms=self._clock.black_time_ms,
+        )
+        self._moves.append(record)
+        self._last_move = (record.from_square, record.to_square)
+        self._review_ply = None
+        self._review_board = None
+
+        new_state = MoveService.build_game_state(
+            self._board,
+            self._last_move,
+            self._moves,
+            white_time_ms=self._clock.white_time_ms,
+            black_time_ms=self._clock.black_time_ms,
+            time_control=self._clock.time_control,
+        )
+        self._game.state = new_state
+
+        logger.info("Remote LAN move executed: %s (%s)", record.san, uci_move)
+        self.move_made.emit(record)
+        self.state_changed.emit(new_state)
+
+        if new_state.status.is_game_over:
+            self._clock.stop()
+            self.game_over.emit(new_state.status, new_state.status_message or "Game over")
+        else:
+            self._clock.switch_turn(new_state.turn)
+
+    def _handle_lan_sync_request(self) -> None:
+        """Send current move history and clocks for client reconnection realignment."""
+        if self._lan_transport is not None:
+            msg = NetworkMessage.sync_state(
+                moves_uci=[m.uci for m in self._moves],
+                white_time_ms=self._clock.white_time_ms,
+                black_time_ms=self._clock.black_time_ms,
+            )
+            self._lan_transport.send_message(msg)
+
+    def _handle_lan_sync_state(self, payload: dict[str, Any]) -> None:
+        """Replay move history from host on reconnection."""
+        moves_uci: list[str] = payload.get("moves_uci", [])
+        w_time = payload.get("white_time_ms")
+        b_time = payload.get("black_time_ms")
+        if w_time is not None and b_time is not None:
+            self._clock.set_times(w_time, b_time)
+
+        self._board.reset()
+        self._moves.clear()
+        for uci in moves_uci:
+            rec = MoveService.execute_uci(self._board, uci)
+            self._moves.append(rec)
+
+        self._last_move = (
+            (self._moves[-1].from_square, self._moves[-1].to_square) if self._moves else None
+        )
+        self._review_ply = None
+        self._review_board = None
+
+        new_state = MoveService.build_game_state(
+            self._board,
+            self._last_move,
+            self._moves,
+            white_time_ms=self._clock.white_time_ms,
+            black_time_ms=self._clock.black_time_ms,
+            time_control=self._clock.time_control,
+        )
+        self._game.state = new_state
+        self.review_changed.emit(None)
+        self.state_changed.emit(new_state)
+
+    def send_lan_draw_offer(self) -> None:
+        """Transmit draw offer to peer over LAN."""
+        if self._is_lan_game and self._lan_transport is not None:
+            self._lan_transport.send_message(NetworkMessage.draw_offer())
+
+    def send_lan_draw_response(self, accept: bool) -> None:
+        """Transmit draw response to peer over LAN."""
+        if self._is_lan_game and self._lan_transport is not None:
+            self._lan_transport.send_message(NetworkMessage.draw_response(accept))
+            if accept:
+                self.accept_draw()
+
     def get_game(self) -> Game:
         """Return the current Game aggregate with latest state."""
         self._game.state = self.get_state()
@@ -258,6 +653,8 @@ class GameService(QObject):
 
     def load_game(self, game: Game) -> None:
         """Load an existing game aggregate into the service."""
+        self.clear_hint()
+        self.disconnect_lan()
         self.cancel_engine_search()
         self._game = game
         self._white_player = game.white_player
@@ -310,11 +707,17 @@ class GameService(QObject):
         if self._is_engine_thinking:
             return False
 
-        # If current turn is computer, reject human manual move attempt
         state = self.get_state()
-        current_player = self._white_player if state.turn == Color.WHITE else self._black_player
-        if current_player.player_type == PlayerType.COMPUTER:
+
+        # In LAN games, ensure player only moves on their assigned turn
+        if self._is_lan_game and state.turn != self._local_player_color:
             return False
+
+        # In vs Computer games, reject manual moves during computer turn
+        if not self._is_lan_game:
+            current_player = self._white_player if state.turn == Color.WHITE else self._black_player
+            if current_player.player_type == PlayerType.COMPUTER:
+                return False
 
         if MoveService.is_promotion(self._board, from_square, to_square) and promotion is None:
             self.promotion_requested.emit(from_square, to_square)
@@ -337,6 +740,7 @@ class GameService(QObject):
         self._last_move = (from_square, to_square)
         self._review_ply = None
         self._review_board = None
+        self.clear_hint()
 
         new_state = MoveService.build_game_state(
             self._board,
@@ -352,6 +756,16 @@ class GameService(QObject):
         self.move_made.emit(record)
         self.state_changed.emit(new_state)
 
+        # Transmit move over LAN if multiplayer
+        if self._is_lan_game and self._lan_transport is not None:
+            self._lan_transport.send_message(
+                NetworkMessage.move(
+                    record.uci,
+                    self._clock.white_time_ms,
+                    self._clock.black_time_ms,
+                )
+            )
+
         if new_state.status.is_game_over:
             self._clock.stop()
             logger.info("Game over: %s (%s)", new_state.status, new_state.status_message)
@@ -364,7 +778,7 @@ class GameService(QObject):
 
     def _trigger_engine_if_needed(self) -> None:
         """Request move from engine if it is computer player's turn."""
-        if self.is_reviewing:
+        if self.is_reviewing or self._is_lan_game:
             return
 
         state = self.get_state()
@@ -379,7 +793,7 @@ class GameService(QObject):
 
     def _on_engine_move(self, uci_move: str) -> None:
         """Execute move returned by engine worker."""
-        if self.is_reviewing:
+        if self.is_reviewing or self._is_lan_game:
             return
 
         state = self.get_state()
@@ -428,19 +842,16 @@ class GameService(QObject):
             self._clock.switch_turn(new_state.turn)
 
     def undo_move(self) -> bool:
-        """Undo the last half-move (or two plies when playing vs computer)."""
+        """Undo the last move, or last two moves if playing against Computer."""
         if not self.can_undo:
             return False
 
-        # Cancel any active search immediately
+        self.clear_hint()
         self.cancel_engine_search()
 
         if self.is_reviewing:
             self.go_to_live()
 
-        # When vs. computer:
-        # If it is currently HUMAN turn, the computer just moved, so undo computer + human (2 moves).
-        # If it is currently COMPUTER turn (cancelled search), undo 1 move (human's move).
         moves_to_undo = 1
         if self.is_vs_computer and len(self._moves) >= 2:
             state = self.get_state()
@@ -461,11 +872,15 @@ class GameService(QObject):
         self._review_board = None
 
         if self._moves:
-            prev = self._moves[-1]
-            if prev.white_time_ms is not None and prev.black_time_ms is not None:
-                self._clock.set_times(prev.white_time_ms, prev.black_time_ms)
+            last_rec = self._moves[-1]
+            next_turn = Color.WHITE if len(self._moves) % 2 == 0 else Color.BLACK
+            self._clock.set_times_and_turn(last_rec.white_time_ms, last_rec.black_time_ms, next_turn)
         else:
-            self._clock.reset(self._clock.time_control)
+            tc = self._clock.time_control
+            if tc:
+                self._clock.reset(tc)
+                if not tc.is_unlimited:
+                    self._clock.start(Color.WHITE)
 
         new_state = MoveService.build_game_state(
             self._board,
@@ -477,21 +892,28 @@ class GameService(QObject):
         )
         self._game.state = new_state
 
-        logger.info("Move undone (%d plies reverted)", moves_to_undo)
+        logger.info("Undo executed. Moves remaining: %d", len(self._moves))
+        self.review_changed.emit(None)
         self.state_changed.emit(new_state)
+
         return True
 
-    def resign(self, color: Color | None = None) -> bool:
-        """Resign game on behalf of the specified color (or current turn)."""
-        self.cancel_engine_search()
-        self._clock.stop()
+    def resign(self, player_color: Color) -> bool:
+        """Handle resignation by player_color."""
         if self.get_state().status.is_game_over:
             return False
 
-        resigning = color or self.get_state().turn
-        winner = resigning.opposite
-        msg = f"{resigning.value.capitalize()} resigned. {winner.value.capitalize()} wins."
+        # In LAN games, transmit resignation to peer if local player resigned
+        if self._is_lan_game and player_color == self._local_player_color and self._lan_transport:
+            self._lan_transport.send_message(NetworkMessage.resign())
 
+        self.cancel_engine_search()
+        self._clock.stop()
+        winner_color = player_color.opposite
+        winner_player = self._white_player if winner_color == Color.WHITE else self._black_player
+        loser_player = self._white_player if player_color == Color.WHITE else self._black_player
+
+        msg = f"{loser_player.name} ({player_color.value.capitalize()}) resigned. {winner_player.name} wins."
         state = MoveService.build_game_state(
             self._board,
             self._last_move,
@@ -510,13 +932,13 @@ class GameService(QObject):
         return True
 
     def accept_draw(self) -> bool:
-        """Accept draw offer and terminate game by mutual agreement."""
-        self.cancel_engine_search()
-        self._clock.stop()
+        """Handle mutual agreement to draw."""
         if self.get_state().status.is_game_over:
             return False
 
-        msg = "Draw agreed by mutual consent."
+        self.cancel_engine_search()
+        self._clock.stop()
+        msg = "Game drawn by mutual agreement."
         state = MoveService.build_game_state(
             self._board,
             self._last_move,
@@ -537,6 +959,7 @@ class GameService(QObject):
     # Navigation & Review Controls
     def navigate_to_ply(self, ply: int | None) -> None:
         """Navigate to a specific historical ply (0 to len(moves)), or None for live."""
+        self.clear_hint()
         if ply is not None:
             ply = max(0, min(ply, len(self._moves)))
             if ply == len(self._moves):
@@ -581,23 +1004,23 @@ class GameService(QObject):
         self.state_changed.emit(state)
 
     def step_backward(self) -> None:
-        """Step one ply backward in history."""
-        curr = self.current_ply
-        if curr > 0:
-            self.navigate_to_ply(curr - 1)
+        target = (self.current_ply - 1) if self._review_ply is not None else (len(self._moves) - 1)
+        if target >= 0:
+            self.navigate_to_ply(target)
 
     def step_forward(self) -> None:
-        """Step one ply forward towards live position."""
         if self._review_ply is not None:
-            self.navigate_to_ply(self._review_ply + 1)
+            target = self._review_ply + 1
+            if target <= len(self._moves):
+                self.navigate_to_ply(target if target < len(self._moves) else None)
 
     def go_to_start(self) -> None:
-        """Jump to position before move 1."""
-        self.navigate_to_ply(0)
+        if len(self._moves) > 0:
+            self.navigate_to_ply(0)
 
     def go_to_live(self) -> None:
-        """Jump to the active live position."""
-        self.navigate_to_ply(None)
+        if self._review_ply is not None:
+            self.navigate_to_ply(None)
 
     def branch_at_current_ply(
         self,
@@ -605,17 +1028,33 @@ class GameService(QObject):
         to_square: str,
         promotion: PieceType | None = None,
     ) -> bool:
-        """Truncate moves after current review ply and execute new move."""
-        if self._review_ply is None:
+        """Truncate move history after reviewed ply and branch into a new variation."""
+        if not self.is_reviewing:
             return self.try_move(from_square, to_square, promotion)
 
-        target_ply = self._review_ply
-        # Truncate moves
-        self._moves = self._moves[:target_ply]
-        # Rebuild live board up to truncated ply
-        self._board = ChessBoard.create_at_ply([m.uci for m in self._moves], target_ply)
+        if self._is_lan_game:
+            return False
+
+        target_ply = self._review_ply if self._review_ply is not None else len(self._moves)
+        trunc_count = len(self._moves) - target_ply
+
+        for _ in range(trunc_count):
+            self._board.pop_move()
+            self._moves.pop()
+
+        self._last_move = (
+            (self._moves[-1].from_square, self._moves[-1].to_square) if self._moves else None
+        )
         self._review_ply = None
         self._review_board = None
+
+        if self._moves:
+            last_rec = self._moves[-1]
+            self._clock.set_times(last_rec.white_time_ms, last_rec.black_time_ms)
+        else:
+            tc = self._clock.time_control
+            if tc:
+                self._clock.reset(tc)
 
         logger.info("Branched game at ply %d", target_ply)
         self.review_changed.emit(None)
@@ -642,7 +1081,8 @@ class GameService(QObject):
         return self._game.state
 
     def cleanup(self) -> None:
-        """Shut down engine worker and clean up background resources."""
+        """Shut down engine worker, disconnect network, and clean up background resources."""
+        self.disconnect_lan()
         self._clock.stop()
         if self._engine_worker is not None:
             self._engine_worker.stop_worker()
