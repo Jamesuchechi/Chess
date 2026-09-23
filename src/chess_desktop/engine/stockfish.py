@@ -144,27 +144,31 @@ class StockfishEngine(ChessEngine):
 
         # Read lines until bestmove (outside lock so stop() can be called concurrently)
         best_move: str | None = None
-        while True:
-            line = self._read_line()
-            if line.startswith("bestmove"):
-                tokens = line.split()
-                if len(tokens) >= 2:
-                    best_move = tokens[1]
-                break
+        try:
+            while True:
+                line = self._read_line()
+                if line.startswith("bestmove"):
+                    tokens = line.split()
+                    if len(tokens) >= 2:
+                        best_move = tokens[1]
+                    break
+        finally:
+            with self._lock:
+                self._is_searching = False
+                was_cancelled = self._is_cancelled
+                self._is_cancelled = False
 
-        with self._lock:
-            self._is_searching = False
-            if self._is_cancelled:
-                raise SearchCancelledError("Search was cancelled by user.")
-            if not best_move or best_move == "(none)":
-                raise RuntimeError("Engine returned no legal moves.")
-            return best_move
+        if was_cancelled:
+            raise SearchCancelledError("Search was cancelled by user.")
+        if not best_move or best_move == "(none)":
+            raise RuntimeError("Engine returned no legal moves.")
+        return best_move
 
     def stop(self) -> None:
         """Send immediate UCI stop command."""
         with self._lock:
-            self._is_cancelled = True
             if self._is_searching and self._process is not None:
+                self._is_cancelled = True
                 try:
                     self._send_line("stop")
                 except RuntimeError:
