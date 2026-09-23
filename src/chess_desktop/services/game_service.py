@@ -3,7 +3,7 @@ import logging
 from typing import Any
 
 import chess
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Qt, Signal
 
 from chess_desktop.chess.board import ChessBoard
 from chess_desktop.chess.clock import ChessClock
@@ -44,6 +44,13 @@ class GameService(QObject):
     lan_peer_joined = Signal(str)  # peer_name
     lan_draw_offered = Signal()
     lan_error = Signal(str)
+
+    # Private queued-dispatch signals — emit these instead of calling the
+    # EngineWorker slots directly so that the call is marshalled onto the
+    # worker's QThread event loop rather than executing on the GUI thread.
+    _request_move_signal = Signal(str, list, object)  # (fen, moves_uci, difficulty)
+    _request_hint_signal = Signal(str, list)  # (fen, moves_uci)
+    _restart_engine_signal = Signal()
 
     def __init__(
         self,
@@ -165,11 +172,23 @@ class GameService(QObject):
             self._engine_worker.stop_worker()
 
         self._engine_worker = worker
+        # Worker → GameService (results delivered back to GUI thread via AutoConnection)
         self._engine_worker.best_move_found.connect(self._on_engine_move)
         self._engine_worker.hint_found.connect(self._on_engine_hint)
         self._engine_worker.search_started.connect(self._on_search_started)
         self._engine_worker.search_stopped.connect(self._on_search_stopped)
         self._engine_worker.engine_error.connect(self._on_engine_error)
+        # GameService → Worker: use QueuedConnection so the call is posted to the
+        # worker thread's event loop rather than executing synchronously on the GUI thread.
+        self._request_move_signal.connect(
+            worker.request_move, Qt.ConnectionType.QueuedConnection
+        )
+        self._request_hint_signal.connect(
+            worker.request_hint, Qt.ConnectionType.QueuedConnection
+        )
+        self._restart_engine_signal.connect(
+            worker.restart_engine, Qt.ConnectionType.QueuedConnection
+        )
         self._engine_worker.start_worker()
 
     @property
@@ -186,9 +205,9 @@ class GameService(QObject):
         if state.status.is_game_over:
             return False
 
-        worker = self.ensure_engine_worker()
+        self.ensure_engine_worker()
         moves_uci = [m.uci for m in self._moves]
-        worker.request_hint(state.fen, moves_uci)
+        self._request_hint_signal.emit(state.fen, moves_uci)
         return True
 
     def clear_hint(self) -> None:
@@ -231,8 +250,10 @@ class GameService(QObject):
         """Restart engine backend and re-trigger calculation if needed."""
         self._is_engine_thinking = False
         self.engine_thinking_changed.emit(False)
-        worker = self.ensure_engine_worker()
-        worker.restart_engine()
+        self.ensure_engine_worker()
+        self._restart_engine_signal.emit()
+        # Re-trigger is posted *after* the restart signal so it arrives on the
+        # worker thread after the restart slot has already completed its work.
         self._trigger_engine_if_needed()
 
     def _on_engine_error(self, error_message: str) -> None:
@@ -787,9 +808,9 @@ class GameService(QObject):
 
         current_player = self._white_player if state.turn == Color.WHITE else self._black_player
         if current_player.player_type == PlayerType.COMPUTER:
-            worker = self.ensure_engine_worker()
+            self.ensure_engine_worker()
             moves_uci = [m.uci for m in self._moves]
-            worker.request_move(state.fen, moves_uci, self._difficulty)
+            self._request_move_signal.emit(state.fen, moves_uci, self._difficulty)
 
     def _on_engine_move(self, uci_move: str) -> None:
         """Execute move returned by engine worker."""
