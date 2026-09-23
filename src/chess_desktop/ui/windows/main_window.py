@@ -302,7 +302,7 @@ class MainWindow(QMainWindow):
             if not dlg.exec():
                 return
 
-        new_dlg = NewGameDialog(parent=self)
+        new_dlg = NewGameDialog(parent=self, settings_service=self._settings_service)
         if not new_dlg.exec():
             return
 

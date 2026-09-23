@@ -1,13 +1,14 @@
 """Unit tests for SettingsService user preferences persistence and signals."""
 
-from PySide6.QtCore import QCoreApplication, QSettings
+from PySide6.QtCore import QSettings
+from PySide6.QtWidgets import QApplication
 
 from chess_desktop.services.settings_service import SettingsService
 
 
 def test_settings_service_defaults() -> None:
     """SettingsService provides reasonable defaults on a clean settings store."""
-    _app = QCoreApplication.instance() or QCoreApplication([])
+    _app = QApplication.instance() or QApplication([])
     settings = QSettings("ChessTestCorp", "TestDefaults")
     settings.clear()
 
@@ -24,7 +25,7 @@ def test_settings_service_defaults() -> None:
 
 def test_settings_service_updates_and_signals() -> None:
     """Setting preferences persists them and triggers appropriate signals."""
-    _app = QCoreApplication.instance() or QCoreApplication([])
+    _app = QApplication.instance() or QApplication([])
     settings = QSettings("ChessTestCorp", "TestUpdates")
     settings.clear()
 
@@ -78,3 +79,46 @@ def test_settings_service_updates_and_signals() -> None:
 
     assert len(generic_calls) >= 6
     settings.clear()
+
+
+def test_settings_service_game_mode_persistence_roundtrip() -> None:
+    """Verify last_game_mode, last_player_color, and last_difficulty roundtrip through SettingsService."""
+    _app = QApplication.instance() or QApplication([])
+    settings = QSettings("ChessTestCorp", "TestGameModeRoundtrip")
+    settings.clear()
+
+    service = SettingsService(settings=settings)
+
+    # Defaults
+    assert service.last_game_mode == "vs Computer"
+    assert service.last_player_color == "white"
+    assert service.last_difficulty == "Intermediate"
+
+    mode_signals: list[str] = []
+    color_signals: list[str] = []
+    diff_signals: list[str] = []
+
+    service.last_game_mode_changed.connect(mode_signals.append)
+    service.last_player_color_changed.connect(color_signals.append)
+    service.last_difficulty_changed.connect(diff_signals.append)
+
+    # Update values
+    service.set_last_game_mode("Pass & Play")
+    service.set_last_player_color("black")
+    service.set_last_difficulty("Advanced")
+
+    assert service.last_game_mode == "Pass & Play"
+    assert service.last_player_color == "black"
+    assert service.last_difficulty == "Advanced"
+    assert mode_signals == ["Pass & Play"]
+    assert color_signals == ["black"]
+    assert diff_signals == ["Advanced"]
+
+    # Simulate app restart by creating a new SettingsService on the same QSettings store
+    restarted_service = SettingsService(settings=settings)
+    assert restarted_service.last_game_mode == "Pass & Play"
+    assert restarted_service.last_player_color == "black"
+    assert restarted_service.last_difficulty == "Advanced"
+
+    settings.clear()
+

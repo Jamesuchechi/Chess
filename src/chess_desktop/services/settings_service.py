@@ -19,6 +19,9 @@ class SettingsService(QObject):
     stockfish_path_changed = Signal(str)
     default_difficulty_changed = Signal(str)
     thinking_delay_enabled_changed = Signal(bool)
+    last_game_mode_changed = Signal(str)
+    last_player_color_changed = Signal(str)
+    last_difficulty_changed = Signal(str)
 
     def __init__(self, parent: Any = None, settings: QSettings | None = None) -> None:
         super().__init__(parent)
@@ -102,3 +105,37 @@ class SettingsService(QObject):
         self._settings.setValue("engine/thinking_delay_enabled", enabled)
         self.thinking_delay_enabled_changed.emit(enabled)
         self.settings_changed.emit()
+
+    @property
+    def last_game_mode(self) -> str:
+        """Last played game mode ('vs Computer' or 'Pass & Play')."""
+        val = self._settings.value("game/last_mode", "vs Computer")
+        return str(val)
+
+    def set_last_game_mode(self, mode: str) -> None:
+        self._settings.setValue("game/last_mode", mode)
+        self.last_game_mode_changed.emit(mode)
+        self.settings_changed.emit()
+
+    @property
+    def last_player_color(self) -> str:
+        """Last chosen player color in vs Computer mode ('white', 'black', or 'random')."""
+        val = self._settings.value("game/last_color", "white")
+        return str(val)
+
+    def set_last_player_color(self, color: str) -> None:
+        self._settings.setValue("game/last_color", color)
+        self.last_player_color_changed.emit(color)
+        self.settings_changed.emit()
+
+    @property
+    def last_difficulty(self) -> str:
+        """Last selected engine difficulty name, falling back to default_difficulty."""
+        val = self._settings.value("game/last_difficulty", self.default_difficulty)
+        return str(val)
+
+    def set_last_difficulty(self, diff: str) -> None:
+        self._settings.setValue("game/last_difficulty", diff)
+        self.last_difficulty_changed.emit(diff)
+        self.settings_changed.emit()
+

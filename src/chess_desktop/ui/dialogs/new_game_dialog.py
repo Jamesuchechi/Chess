@@ -22,6 +22,7 @@ from chess_desktop.domain.enums import Color, PlayerType
 from chess_desktop.domain.time_control import TimeControl
 from chess_desktop.engine.difficulty import Difficulty
 from chess_desktop.engine.discovery import find_stockfish_binary
+from chess_desktop.services.settings_service import SettingsService
 
 
 class NewGameDialog(QDialog):
@@ -30,14 +31,29 @@ class NewGameDialog(QDialog):
     def __init__(
         self,
         parent: QWidget | None = None,
+        settings_service: SettingsService | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Start New Game")
         self.setFixedWidth(460)
         self.setModal(True)
 
-        self._stockfish_path = find_stockfish_binary()
-        self._init_ui()
+        self._settings_service = (
+            settings_service
+            or getattr(parent, "settings_service", None)
+            or SettingsService(self)
+        )
+        self._stockfish_path = (
+            (self._settings_service.stockfish_path or None)
+            if self._settings_service
+            else None
+        ) or find_stockfish_binary()
+        self._is_restoring = True
+        try:
+            self._init_ui()
+            self._restore_settings()
+        finally:
+            self._is_restoring = False
 
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -82,6 +98,7 @@ class NewGameDialog(QDialog):
         self._color_group.addButton(self._radio_white)
         self._color_group.addButton(self._radio_black)
         self._color_group.addButton(self._radio_random)
+        self._color_group.buttonToggled.connect(self._on_color_toggled)
 
         color_h_layout.addWidget(self._radio_white)
         color_h_layout.addWidget(self._radio_black)
@@ -310,11 +327,65 @@ class NewGameDialog(QDialog):
         is_vs_comp = self._btn_vs_computer.isChecked()
         self._comp_group.setVisible(is_vs_comp)
         self._local_group.setVisible(not is_vs_comp)
+        if not self._is_restoring:
+            self._save_settings()
+
+    def _on_color_toggled(self) -> None:
+        if not self._is_restoring:
+            self._save_settings()
 
     def _on_difficulty_changed(self, index: int) -> None:
         diff = self._diff_combo.itemData(index)
         if isinstance(diff, Difficulty):
             self._diff_desc.setText(diff.description)
+        if not self._is_restoring:
+            self._save_settings()
+
+    def _restore_settings(self) -> None:
+        self._is_restoring = True
+        try:
+            # Restore Game Mode
+            mode = self._settings_service.last_game_mode.lower()
+            if "pass" in mode:
+                self._btn_pass_play.setChecked(True)
+            else:
+                self._btn_vs_computer.setChecked(True)
+            self._on_mode_toggled()
+
+            # Restore Player Color
+            color = self._settings_service.last_player_color.lower()
+            if color == "black":
+                self._radio_black.setChecked(True)
+            elif color == "random":
+                self._radio_random.setChecked(True)
+            else:
+                self._radio_white.setChecked(True)
+
+            # Restore Difficulty
+            diff_name = self._settings_service.last_difficulty
+            idx = self._diff_combo.findText(diff_name)
+            if idx >= 0:
+                self._diff_combo.setCurrentIndex(idx)
+        finally:
+            self._is_restoring = False
+
+    def _save_settings(self) -> None:
+        mode = "Pass & Play" if self._btn_pass_play.isChecked() else "vs Computer"
+        self._settings_service.set_last_game_mode(mode)
+
+        if self._radio_black.isChecked():
+            color = "black"
+        elif self._radio_random.isChecked():
+            color = "random"
+        else:
+            color = "white"
+        self._settings_service.set_last_player_color(color)
+
+        self._settings_service.set_last_difficulty(self.selected_difficulty.display_name)
+
+    def accept(self) -> None:
+        self._save_settings()
+        super().accept()
 
     def _on_time_control_changed(self, index: int) -> None:
         is_custom = self._tc_combo.itemData(index) is None
