@@ -90,6 +90,14 @@ class DatabaseManager:
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_games_updated_at ON games (updated_at DESC);
+
+                CREATE TABLE IF NOT EXISTS game_analysis (
+                    game_id       TEXT PRIMARY KEY,
+                    analysis_json TEXT NOT NULL,
+                    white_accuracy REAL NOT NULL DEFAULT 0.0,
+                    black_accuracy REAL NOT NULL DEFAULT 0.0,
+                    created_at    TEXT NOT NULL
+                );
                 """
             )
 

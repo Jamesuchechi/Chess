@@ -5,7 +5,7 @@ import time
 
 import chess
 
-from chess_desktop.engine.engine import ChessEngine
+from chess_desktop.engine.engine import ChessEngine, PositionEval
 
 
 class FallbackEngine(ChessEngine):
@@ -78,6 +78,23 @@ class FallbackEngine(ChessEngine):
     def is_ready(self) -> bool:
         """Check readiness."""
         return self._is_running
+
+    def evaluate_position(
+        self,
+        depth: int = 14,
+        time_ms: int | None = None,
+    ) -> PositionEval:
+        """Return a synthetic evaluation (0 cp, first legal move as best).
+
+        The FallbackEngine has no real evaluation capability; this stub exists
+        so that :class:`AnalysisService` can run integration tests without a
+        Stockfish binary.  Scores are always 0 cp.
+        """
+        if not self._is_running:
+            raise RuntimeError("FallbackEngine is not started.")
+        legal = list(self._board.legal_moves)
+        best = legal[0].uci() if legal else None
+        return PositionEval(best_move_uci=best, score_cp=0, mate_in=None, depth=depth)
 
     def quit(self) -> None:
         """Shut down engine."""

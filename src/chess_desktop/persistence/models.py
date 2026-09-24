@@ -93,3 +93,14 @@ class SavedGameSummary:
     move_count: int
     created_at: str
     updated_at: str
+
+
+@dataclass(frozen=True)
+class AnalysisRecord:
+    """Persisted analysis result row in the game_analysis table."""
+
+    game_id: str
+    analysis_json: str  # JSON-serialised GameAnalysis.moves
+    white_accuracy: float
+    black_accuracy: float
+    created_at: str

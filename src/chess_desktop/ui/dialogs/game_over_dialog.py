@@ -30,6 +30,7 @@ class GameOverDialog(QDialog):
         self._status = status
         self._message = message
         self._start_new_game = False
+        self._analyse_requested = False
 
         self._init_ui()
 
@@ -37,6 +38,16 @@ class GameOverDialog(QDialog):
     def start_new_game_requested(self) -> bool:
         """True if player clicked New Game button."""
         return self._start_new_game
+
+    @property
+    def analyse_requested(self) -> bool:
+        """True if player clicked Review Game button."""
+        return self._analyse_requested
+
+    @property
+    def review_game_requested(self) -> bool:
+        """True if player clicked Review Game button."""
+        return self._analyse_requested
 
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -81,6 +92,26 @@ class GameOverDialog(QDialog):
         review_btn.clicked.connect(self.reject)
         btn_layout.addWidget(review_btn)
 
+        analyse_btn = QPushButton("🔍 Review Game", self)
+        analyse_btn.setStyleSheet(
+            """
+            QPushButton {
+                background-color: #1e3a5f;
+                color: #60c0ff;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-weight: bold;
+                border: 1px solid #2a5fa0;
+            }
+            QPushButton:hover {
+                background-color: #2a5fa0;
+                color: #ffffff;
+            }
+            """
+        )
+        analyse_btn.clicked.connect(self._on_analyse)
+        btn_layout.addWidget(analyse_btn)
+
         new_game_btn = QPushButton("New Game", self)
         new_game_btn.setStyleSheet(
             """
@@ -103,4 +134,8 @@ class GameOverDialog(QDialog):
 
     def _on_new_game(self) -> None:
         self._start_new_game = True
+        self.accept()
+
+    def _on_analyse(self) -> None:
+        self._analyse_requested = True
         self.accept()

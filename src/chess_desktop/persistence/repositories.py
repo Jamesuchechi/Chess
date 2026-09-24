@@ -171,7 +171,69 @@ class GameRepository:
         ]
 
     def delete(self, game_id: str) -> bool:
-        """Delete a saved game by ID."""
+        """Delete a saved game by ID and its cached analysis."""
         with self._db.connection() as conn:
+            conn.execute("DELETE FROM game_analysis WHERE game_id = ?", (game_id,))
             cursor = conn.execute("DELETE FROM games WHERE id = ?", (game_id,))
+            return cursor.rowcount > 0
+
+
+class AnalysisRepository:
+    """Repository for storing and retrieving cached game analysis results."""
+
+    def __init__(self, db: DatabaseManager) -> None:
+        self._db = db
+
+    def exists(self, game_id: str) -> bool:
+        """Return True if analysis is already cached for this game."""
+        with self._db.connection() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM game_analysis WHERE game_id = ?", (game_id,)
+            ).fetchone()
+            return row is not None
+
+    def save(self, game_analysis: "GameAnalysis") -> None:  # type: ignore[name-defined]  # noqa: F821
+        """Insert or replace cached analysis for a game."""
+        from datetime import UTC, datetime
+
+        from chess_desktop.domain.analysis import game_analysis_to_json
+
+        now_iso = datetime.now(UTC).isoformat()
+        json_str = game_analysis_to_json(game_analysis)
+        with self._db.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO game_analysis (game_id, analysis_json, white_accuracy, black_accuracy, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(game_id) DO UPDATE SET
+                    analysis_json  = excluded.analysis_json,
+                    white_accuracy = excluded.white_accuracy,
+                    black_accuracy = excluded.black_accuracy,
+                    created_at     = excluded.created_at;
+                """,
+                (
+                    game_analysis.game_id,
+                    json_str,
+                    game_analysis.white_accuracy,
+                    game_analysis.black_accuracy,
+                    now_iso,
+                ),
+            )
+
+    def get(self, game_id: str) -> "GameAnalysis | None":  # type: ignore[name-defined]  # noqa: F821
+        """Load and deserialise cached analysis for a game, or None if not cached."""
+        from chess_desktop.domain.analysis import game_analysis_from_json
+
+        with self._db.connection() as conn:
+            row = conn.execute(
+                "SELECT analysis_json FROM game_analysis WHERE game_id = ?", (game_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            return game_analysis_from_json(str(row["analysis_json"]))
+
+    def delete(self, game_id: str) -> bool:
+        """Delete cached analysis for a game."""
+        with self._db.connection() as conn:
+            cursor = conn.execute("DELETE FROM game_analysis WHERE game_id = ?", (game_id,))
             return cursor.rowcount > 0

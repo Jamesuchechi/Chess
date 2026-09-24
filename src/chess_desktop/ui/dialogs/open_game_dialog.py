@@ -30,6 +30,7 @@ class OpenGameDialog(QDialog):
         super().__init__(parent)
         self._repo = repository
         self._selected_game_id: str | None = None
+        self._review_requested: bool = False
         self._all_games: list[SavedGameSummary] = []
 
         self.setWindowTitle("Open Saved Game")
@@ -43,6 +44,11 @@ class OpenGameDialog(QDialog):
     def selected_game_id(self) -> str | None:
         """Return ID of chosen game, or None if cancelled."""
         return self._selected_game_id
+
+    @property
+    def review_requested(self) -> bool:
+        """Return True if user requested Review Game on the selected game."""
+        return self._review_requested
 
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -186,24 +192,50 @@ class OpenGameDialog(QDialog):
         self._open_btn.setStyleSheet(
             """
             QPushButton {
-                background-color: #769656;
+                background-color: #383838;
                 color: #ffffff;
-                padding: 6px 18px;
+                padding: 6px 14px;
                 border-radius: 4px;
                 font-size: 13px;
-                font-weight: bold;
             }
             QPushButton:hover:enabled {
-                background-color: #87ab62;
+                background-color: #484848;
             }
             QPushButton:disabled {
-                background-color: #333333;
+                background-color: #2b2b2b;
                 color: #666666;
             }
             """
         )
         self._open_btn.clicked.connect(self._on_open)
         btn_layout.addWidget(self._open_btn)
+
+        self._review_btn = QPushButton("🔍 Review Game", self)
+        self._review_btn.setEnabled(False)
+        self._review_btn.setStyleSheet(
+            """
+            QPushButton {
+                background-color: #1e3a5f;
+                color: #60c0ff;
+                padding: 6px 16px;
+                border-radius: 4px;
+                font-size: 13px;
+                font-weight: bold;
+                border: 1px solid #2a5fa0;
+            }
+            QPushButton:hover:enabled {
+                background-color: #2a5fa0;
+                color: #ffffff;
+            }
+            QPushButton:disabled {
+                background-color: #1a2a3a;
+                color: #3a6080;
+                border-color: #1a3050;
+            }
+            """
+        )
+        self._review_btn.clicked.connect(self._on_review)
+        btn_layout.addWidget(self._review_btn)
 
         layout.addLayout(btn_layout)
 
@@ -257,6 +289,7 @@ class OpenGameDialog(QDialog):
         selected_rows = self._table.selectionModel().selectedRows()
         has_sel = len(selected_rows) > 0
         self._open_btn.setEnabled(has_sel)
+        self._review_btn.setEnabled(has_sel)
         self._delete_btn.setEnabled(has_sel)
 
     def _get_current_selected_id(self) -> str | None:
@@ -274,6 +307,14 @@ class OpenGameDialog(QDialog):
         game_id = self._get_current_selected_id()
         if game_id:
             self._selected_game_id = game_id
+            self._review_requested = False
+            self.accept()
+
+    def _on_review(self) -> None:
+        game_id = self._get_current_selected_id()
+        if game_id:
+            self._selected_game_id = game_id
+            self._review_requested = True
             self.accept()
 
     def _on_delete(self) -> None:

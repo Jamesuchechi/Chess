@@ -11,9 +11,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from chess_desktop.domain.analysis import GameAnalysis
 from chess_desktop.domain.enums import Color, GameStatus, PieceType, PlayerType
 from chess_desktop.domain.game_state import GameState
 from chess_desktop.domain.theme import BoardTheme
+from chess_desktop.services.analysis_service import AnalysisService
 from chess_desktop.services.game_service import GameService
 from chess_desktop.services.save_service import SaveService
 from chess_desktop.services.settings_service import SettingsService
@@ -59,6 +61,7 @@ class MainWindow(QMainWindow):
         self._save_service = SaveService(self._service, parent=self)
         self._settings_service = SettingsService(self)
         self._sound_service = SoundService(self)
+        self._analysis_service = AnalysisService(parent=self)
         self._init_menu_bar()
         self._init_ui()
         self._init_shortcuts()
@@ -85,6 +88,11 @@ class MainWindow(QMainWindow):
     def sound_service(self) -> SoundService:
         """Access sound playback service."""
         return self._sound_service
+
+    @property
+    def analysis_service(self) -> AnalysisService:
+        """Access post-game analysis service."""
+        return self._analysis_service
 
     @property
     def board_widget(self) -> BoardWidget:
@@ -254,6 +262,11 @@ class MainWindow(QMainWindow):
 
     def _connect_signals(self) -> None:
         """Connect service signals to window dialogs and status bar."""
+        self._history_panel.analysis_requested.connect(self._trigger_analysis)
+        self._analysis_service.analysis_started.connect(self._on_analysis_started)
+        self._analysis_service.analysis_progress.connect(self._on_analysis_progress)
+        self._analysis_service.analysis_complete.connect(self._on_analysis_complete)
+        self._analysis_service.analysis_error.connect(self._on_analysis_error)
         self._service.promotion_requested.connect(self._handle_promotion)
         self._service.game_over.connect(self._handle_game_over)
         self._service.game_over.connect(lambda *_: self._sound_service.play_game_end())
@@ -334,6 +347,8 @@ class MainWindow(QMainWindow):
                 self._service.flip_board()
 
         self._save_service.reset_tracking()
+        self._analysis_service.cancel_analysis()
+        self._history_panel.set_game_over(False)
         self._update_window_title()
         self._sound_service.play_game_start()
 
@@ -386,6 +401,16 @@ class MainWindow(QMainWindow):
                     self._status_bar.showMessage(
                         f"Loaded game: {self._save_service.current_game_title}"
                     )
+                    state = self._service.get_state()
+                    self._history_panel.set_game_over(state.status.is_game_over)
+                    cached = self._analysis_service.get_cached_analysis(game_id)
+                    if cached is not None:
+                        self._history_panel.apply_analysis(cached)
+                        self._status_bar.showMessage(
+                            f"Loaded cached analysis for {self._save_service.current_game_title}"
+                        )
+                    elif open_dlg.review_requested:
+                        self._trigger_analysis()
 
     def _handle_export_pgn(self) -> None:
         """Export active game to standard PGN file."""
@@ -451,6 +476,7 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
 
+        self._analysis_service.cleanup()
         self._service.cleanup()
         event.accept()
 
@@ -463,10 +489,14 @@ class MainWindow(QMainWindow):
             self._service.try_move(from_sq, to_sq, promotion=chosen_piece)
 
     def _handle_game_over(self, status: GameStatus, message: str) -> None:
-        """Show Game Over dialog and offer new game."""
+        """Show Game Over dialog and offer new game or analysis."""
+        self._history_panel.set_game_over(True)
         dialog = GameOverDialog(status, message, self)
-        if dialog.exec() and dialog.start_new_game_requested:
-            self._handle_new_game()
+        if dialog.exec():
+            if dialog.start_new_game_requested:
+                self._handle_new_game()
+            elif dialog.review_game_requested:
+                self._trigger_analysis()
 
     def _handle_engine_thinking_changed(self, is_thinking: bool) -> None:
         """Update status bar when engine starts or finishes thinking."""
@@ -477,6 +507,7 @@ class MainWindow(QMainWindow):
 
     def _handle_state_changed(self, state: GameState) -> None:
         """Update status bar on state change."""
+        self._history_panel.set_game_over(state.status.is_game_over)
         turn_str = "White" if state.turn == state.turn.WHITE else "Black"
         if state.is_reviewing:
             ply = state.review_ply or 0
@@ -555,4 +586,41 @@ class MainWindow(QMainWindow):
     def _handle_hint_received(self, from_sq: str, to_sq: str, san: str) -> None:
         """Display suggested best move in the status bar."""
         self._status_bar.showMessage(f"💡 Best move hint: {san} ({from_sq} ➔ {to_sq})")
+
+    def _trigger_analysis(self) -> None:
+        """Trigger post-game analysis on the current completed game."""
+        game = self._service.get_game()
+        state = self._service.get_state()
+        moves_uci = [m.uci for m in state.moves]
+        if not moves_uci:
+            self._status_bar.showMessage("No moves to analyse.")
+            return
+
+        game_id = self._save_service.current_game_id or game.game_id
+        self._status_bar.showMessage(f"Starting analysis for game ({len(moves_uci)} moves)...")
+        self._analysis_service.request_analysis(game_id, moves_uci)
+
+    def _on_analysis_started(self, game_id: str) -> None:
+        """Handle background analysis start."""
+        total = len(self._service.get_state().moves)
+        self._history_panel.set_analysis_progress(0, total)
+        self._status_bar.showMessage("Game analysis in progress...")
+
+    def _on_analysis_progress(self, game_id: str, done: int, total: int) -> None:
+        """Update progress on status bar and history panel."""
+        self._history_panel.set_analysis_progress(done, total)
+        self._status_bar.showMessage(f"Analysing game: move {done}/{total}...")
+
+    def _on_analysis_complete(self, analysis: GameAnalysis) -> None:
+        """Display completed analysis on history panel and status bar."""
+        self._history_panel.apply_analysis(analysis)
+        self._status_bar.showMessage(
+            f"Analysis complete: White {analysis.white_accuracy:.1f}%, Black {analysis.black_accuracy:.1f}%"
+        )
+
+    def _on_analysis_error(self, error: str) -> None:
+        """Handle analysis error."""
+        self._history_panel.set_analysis_idle()
+        self._status_bar.showMessage(f"Analysis error: {error}")
+
 

@@ -6,7 +6,7 @@ import threading
 from pathlib import Path
 
 from chess_desktop.engine.discovery import find_stockfish_binary
-from chess_desktop.engine.engine import ChessEngine
+from chess_desktop.engine.engine import ChessEngine, PositionEval
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +163,83 @@ class StockfishEngine(ChessEngine):
         if not best_move or best_move == "(none)":
             raise RuntimeError("Engine returned no legal moves.")
         return best_move
+
+    def evaluate_position(
+        self,
+        depth: int = 14,
+        time_ms: int | None = None,
+    ) -> PositionEval:
+        """Evaluate current position, returning centipawn/mate score and best move.
+
+        Sends a ``go depth N`` (+ optional ``movetime M``) command and collects
+        score information from ``info`` lines before the final ``bestmove`` reply.
+        Does not modify the position set via :meth:`set_position`.
+        """
+        with self._lock:
+            if self._is_cancelled:
+                self._is_cancelled = False
+                raise SearchCancelledError("Evaluation cancelled.")
+            self._is_searching = True
+            self._is_cancelled = False
+
+            parts = ["go"]
+            if time_ms is not None and time_ms > 0:
+                parts.append(f"movetime {time_ms}")
+            if depth > 0:
+                parts.append(f"depth {depth}")
+            self._send_line(" ".join(parts))
+
+        # Collect score from info lines; update whenever a deeper info arrives.
+        score_cp: int | None = None
+        mate_in: int | None = None
+        reached_depth: int = 0
+        best_move: str | None = None
+
+        try:
+            while True:
+                line = self._read_line()
+                if line.startswith("info"):
+                    tokens = line.split()
+                    # Parse depth
+                    if "depth" in tokens:
+                        try:
+                            reached_depth = int(tokens[tokens.index("depth") + 1])
+                        except (ValueError, IndexError):
+                            pass
+                    # Parse score
+                    if "score" in tokens:
+                        idx = tokens.index("score")
+                        try:
+                            kind = tokens[idx + 1]
+                            value = int(tokens[idx + 2])
+                            if kind == "cp":
+                                score_cp = value
+                                mate_in = None
+                            elif kind == "mate":
+                                mate_in = value
+                                score_cp = None
+                        except (ValueError, IndexError):
+                            pass
+                elif line.startswith("bestmove"):
+                    tokens = line.split()
+                    if len(tokens) >= 2 and tokens[1] != "(none)":
+                        best_move = tokens[1]
+                    break
+        finally:
+            with self._lock:
+                self._is_searching = False
+                was_cancelled = self._is_cancelled
+                self._is_cancelled = False
+
+        if was_cancelled:
+            raise SearchCancelledError("Evaluation cancelled by user.")
+
+        return PositionEval(
+            best_move_uci=best_move,
+            score_cp=score_cp,
+            mate_in=mate_in,
+            depth=reached_depth or depth,
+        )
 
     def stop(self) -> None:
         """Send immediate UCI stop command."""
